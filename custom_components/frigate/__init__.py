@@ -274,6 +274,57 @@ def get_known_plates(config: dict[str, Any]) -> set[str]:
     return known_plates
 
 
+def build_mqtt_topics_with_optional_tracking(
+    config: dict[str, Any],
+    cam_name: str,
+    obj_name: str,
+    primary_topic: str,
+    primary_callback: Callable,
+    secondary_callback: Callable | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Build MQTT topic configuration with optional tracked_object_update subscription.
+    
+    Args:
+        config: Frigate configuration
+        cam_name: Camera name
+        obj_name: Object name to check for attribute models
+        primary_topic: Primary MQTT topic to subscribe to
+        primary_callback: Callback for primary topic
+        secondary_callback: Optional callback for tracked_object_update topic
+        
+    Returns:
+        Dictionary of topic configurations for MQTT subscription
+    """
+    topics = {
+        "state_topic": {
+            "msg_callback": primary_callback,
+            "qos": 0,
+            "topic": primary_topic,
+            "encoding": None,
+        },
+    }
+    
+    # Add tracked_object_update subscription if there are attribute models for this object
+    # and a secondary callback is provided
+    if secondary_callback:
+        attribute_models_map = get_attribute_classification_models_and_base_objects(config)
+        has_attribute_models = any(
+            obj_name in base_objects 
+            for base_objects in attribute_models_map.values()
+        )
+        
+        if has_attribute_models:
+            mqtt_prefix = config.get("mqtt", {}).get("topic_prefix", "frigate")
+            topics["attribute_topic"] = {
+                "msg_callback": secondary_callback,
+                "qos": 0,
+                "topic": f"{mqtt_prefix}/tracked_object_update",
+                "encoding": None,
+            }
+    
+    return topics
+
+
 def get_cameras_zones_and_objects(config: dict[str, Any]) -> set[tuple[str, str]]:
     """Get cameras/zones and tracking object tuples."""
     camera_objects = get_cameras_and_objects(config)

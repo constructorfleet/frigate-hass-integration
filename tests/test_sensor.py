@@ -1679,11 +1679,11 @@ async def test_attribute_count_sensor(hass: HomeAssistant) -> None:
         await setup_mock_frigate_config_entry(hass)
 
     # Get the person count sensor
-    entity_state = hass.states.get(TEST_SENSOR_FRONT_DOOR_PERSON_ENTITY_ID)
-    assert entity_state
-    
     async_fire_mqtt_message(hass, "frigate/available", "online")
     await hass.async_block_till_done()
+    
+    entity_state = hass.states.get(TEST_SENSOR_FRONT_DOOR_PERSON_ENTITY_ID)
+    assert entity_state
     
     # Initially no attributes
     assert entity_state.attributes.get("standing") is None

@@ -33,6 +33,7 @@ from . import (
     FrigateEntity,
     FrigateMQTTEntity,
     ReceiveMessage,
+    build_mqtt_topics_with_optional_tracking,
     get_attribute_classification_models_and_base_objects,
     get_cameras,
     get_cameras_zones_and_objects,
@@ -788,29 +789,19 @@ class FrigateObjectCountSensor(FrigateMQTTEntity, SensorEntity):
             if obj_name in base_objects:
                 self._attribute_models.append(model_key)
 
-        topics = {
-            "state_topic": {
-                "msg_callback": self._state_message_received,
-                "qos": 0,
-                "topic": (
-                    f"{self._frigate_config['mqtt']['topic_prefix']}"
-                    f"/{self._cam_name}/{self._obj_name}"
-                ),
-                "encoding": None,
-            },
-        }
+        primary_topic = (
+            f"{self._frigate_config['mqtt']['topic_prefix']}"
+            f"/{self._cam_name}/{self._obj_name}"
+        )
         
-        # Add tracked_object_update subscription if there are attribute models for this object
-        if self._attribute_models:
-            topics["attribute_topic"] = {
-                "msg_callback": self._attribute_message_received,
-                "qos": 0,
-                "topic": (
-                    f"{self._frigate_config['mqtt']['topic_prefix']}"
-                    "/tracked_object_update"
-                ),
-                "encoding": None,
-            }
+        topics = build_mqtt_topics_with_optional_tracking(
+            frigate_config,
+            cam_name,
+            obj_name,
+            primary_topic,
+            self._state_message_received,
+            self._attribute_message_received if self._attribute_models else None,
+        )
 
         super().__init__(
             config_entry,

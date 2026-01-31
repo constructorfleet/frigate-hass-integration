@@ -269,6 +269,10 @@ async def test_attribute_occupancy_sensor(hass: HomeAssistant) -> None:
     """Test FrigateObjectOccupancySensor tracks attribute classifications."""
     await setup_mock_frigate_config_entry(hass)
 
+    # Wait for MQTT to be available
+    async_fire_mqtt_message(hass, "frigate/available", "online")
+    await hass.async_block_till_done()
+
     # Get the person occupancy sensor
     entity_state = hass.states.get(TEST_BINARY_SENSOR_FRONT_DOOR_PERSON_OCCUPANCY_ENTITY_ID)
     assert entity_state
