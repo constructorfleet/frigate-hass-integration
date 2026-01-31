@@ -130,8 +130,12 @@ class FrigateObjectOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
         self._obj_name = obj_name
         self._is_on = False
         self._frigate_config = frigate_config
-        self._attribute_counts: dict[str, int] = {}  # Track attribute -> count
-        self._tracked_object_attributes: dict[str, str] = {}  # object_id -> attribute
+        # Track attribute classifications: attribute_name -> count
+        self._attribute_counts: dict[str, int] = {}
+        # Track object_id -> attribute mapping
+        # Note: Entries persist for object lifecycle. The primary occupancy state from
+        # the main MQTT topic remains authoritative. Attribute counts are supplementary.
+        self._tracked_object_attributes: dict[str, str] = {}
         
         # Find which attribute classification models apply to this object
         self._attribute_models = []
@@ -289,7 +293,10 @@ class FrigateSublabelOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
         self._sublabel_class = sublabel_class
         self._is_on = False
         self._frigate_config = frigate_config
-        self._tracked_objects: set[str] = set()  # Track object_ids with this sublabel
+        # Track object_ids with this sublabel
+        # Note: Entries persist for object lifecycle. Classification messages are
+        # event-driven and objects may be reclassified to different sublabels over time.
+        self._tracked_objects: set[str] = set()
 
         super().__init__(
             config_entry,

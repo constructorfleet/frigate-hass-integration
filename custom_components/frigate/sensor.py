@@ -779,8 +779,12 @@ class FrigateObjectCountSensor(FrigateMQTTEntity, SensorEntity):
         self._state = 0
         self._frigate_config = frigate_config
         self._icon = get_icon_from_type(self._obj_name)
-        self._attribute_counts: dict[str, int] = {}  # Track attribute -> count
-        self._tracked_object_attributes: dict[str, str] = {}  # object_id -> attribute
+        # Track attribute classifications: attribute_name -> count
+        self._attribute_counts: dict[str, int] = {}
+        # Track object_id -> attribute mapping
+        # Note: Entries persist for object lifecycle. The primary count from the
+        # main MQTT topic remains authoritative. Attribute counts are supplementary.
+        self._tracked_object_attributes: dict[str, str] = {}
         
         # Find which attribute classification models apply to this object
         self._attribute_models = []
@@ -1030,7 +1034,10 @@ class FrigateSublabelCountSensor(FrigateMQTTEntity, SensorEntity):
         self._state = 0
         self._frigate_config = frigate_config
         self._icon = get_icon_from_type(self._obj_name)
-        self._tracked_objects: dict[str, str] = {}  # Track object_id -> sublabel
+        # Track object_id -> sublabel mapping
+        # Note: Entries persist for object lifecycle. Classification messages
+        # are event-driven and objects may be reclassified over time.
+        self._tracked_objects: dict[str, str] = {}
 
         super().__init__(
             config_entry,

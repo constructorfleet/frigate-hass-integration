@@ -286,11 +286,14 @@ def build_mqtt_topics_with_optional_tracking(
     
     Args:
         config: Frigate configuration
-        cam_name: Camera name
-        obj_name: Object name to check for attribute models
+        cam_name: Camera name (reserved for future filtering use)
+        obj_name: Object name to check for attribute models - this determines if
+                 the tracked_object_update topic should be subscribed to
         primary_topic: Primary MQTT topic to subscribe to
         primary_callback: Callback for primary topic
-        secondary_callback: Optional callback for tracked_object_update topic
+        secondary_callback: Optional callback for tracked_object_update topic.
+                          If provided and attribute models exist for obj_name,
+                          the tracked_object_update topic will be added.
         
     Returns:
         Dictionary of topic configurations for MQTT subscription
