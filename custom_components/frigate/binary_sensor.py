@@ -32,7 +32,14 @@ from . import (
     get_sublabel_classification_models_and_base_objects,
     get_zones,
 )
-from .const import ATTR_CLIENT, ATTR_CONFIG, DOMAIN, NAME
+from .const import (
+    ATTR_CLIENT,
+    ATTR_CONFIG,
+    CONF_ENABLE_ATTRIBUTE_TRACKING,
+    CONF_ENABLE_SUBLABEL_SENSORS,
+    DOMAIN,
+    NAME,
+)
 from .icons import get_dynamic_icon_from_type
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
@@ -84,11 +91,12 @@ async def async_setup_entry(
     frigate_config = hass.data[DOMAIN][entry.entry_id][ATTR_CONFIG]
     client = hass.data[DOMAIN][entry.entry_id][ATTR_CLIENT]
     entities: list[FrigateEntity] = []
+    enable_attribute_tracking = entry.options.get(CONF_ENABLE_ATTRIBUTE_TRACKING, True)
 
     # Add object sensors for cameras and zones.
     entities.extend(
         [
-            FrigateObjectOccupancySensor(entry, frigate_config, cam_name, obj)
+            FrigateObjectOccupancySensor(entry, frigate_config, cam_name, obj, enable_attribute_tracking)
             for cam_name, obj in get_cameras_zones_and_objects(frigate_config)
         ]
     )
@@ -110,7 +118,9 @@ async def async_setup_entry(
     )
     
     # Add sublabel occupancy sensors
-    await _create_sublabel_occupancy_sensors(entry, frigate_config, client, entities)
+    # Only create if the option is enabled (defaults to True)
+    if entry.options.get(CONF_ENABLE_SUBLABEL_SENSORS, True):
+        await _create_sublabel_occupancy_sensors(entry, frigate_config, client, entities)
 
     async_add_entities(entities)
 
@@ -124,6 +134,7 @@ class FrigateObjectOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
         frigate_config: dict[str, Any],
         cam_name: str,
         obj_name: str,
+        enable_attribute_tracking: bool = True,
     ) -> None:
         """Construct a new FrigateObjectOccupancySensor."""
         self._cam_name = cam_name
@@ -138,11 +149,13 @@ class FrigateObjectOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
         self._tracked_object_attributes: dict[str, str] = {}
         
         # Find which attribute classification models apply to this object
+        # Only check if attribute tracking is enabled
         self._attribute_models = []
-        attribute_models_map = get_attribute_classification_models_and_base_objects(frigate_config)
-        for model_key, base_objects in attribute_models_map.items():
-            if obj_name in base_objects:
-                self._attribute_models.append(model_key)
+        if enable_attribute_tracking:
+            attribute_models_map = get_attribute_classification_models_and_base_objects(frigate_config)
+            for model_key, base_objects in attribute_models_map.items():
+                if obj_name in base_objects:
+                    self._attribute_models.append(model_key)
 
         primary_topic = (
             f"{self._frigate_config['mqtt']['topic_prefix']}"
