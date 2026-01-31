@@ -211,6 +211,56 @@ def get_object_classification_models_and_cameras(
     return model_cameras
 
 
+def get_sublabel_classification_models_and_base_objects(
+    config: dict[str, Any],
+) -> dict[str, list[str]]:
+    """Get mapping of sublabel classification models to their base objects.
+    
+    Returns a dict where keys are model_keys and values are lists of base object types.
+    Example: {"person_classifier": ["person"], "dog_classifier": ["dog"]}
+    """
+    model_objects: dict[str, list[str]] = {}
+    classification_config = config.get("classification", {}).get("custom", {})
+
+    for model_key, model_config in classification_config.items():
+        object_config = model_config.get("object_config")
+
+        if object_config:
+            classification_type = object_config.get("classification_type")
+            # Only include models with sub_label classification type
+            if classification_type == "sub_label":
+                objects_to_classify = object_config.get("objects", [])
+                if objects_to_classify:
+                    model_objects[model_key] = objects_to_classify
+
+    return model_objects
+
+
+def get_attribute_classification_models_and_base_objects(
+    config: dict[str, Any],
+) -> dict[str, list[str]]:
+    """Get mapping of attribute classification models to their base objects.
+    
+    Returns a dict where keys are model_keys and values are lists of base object types.
+    Example: {"wastebin_orientation": ["wastebin"]}
+    """
+    model_objects: dict[str, list[str]] = {}
+    classification_config = config.get("classification", {}).get("custom", {})
+
+    for model_key, model_config in classification_config.items():
+        object_config = model_config.get("object_config")
+
+        if object_config:
+            classification_type = object_config.get("classification_type")
+            # Only include models with attribute classification type
+            if classification_type == "attribute":
+                objects_to_classify = object_config.get("objects", [])
+                if objects_to_classify:
+                    model_objects[model_key] = objects_to_classify
+
+    return model_objects
+
+
 def get_known_plates(config: dict[str, Any]) -> set[str]:
     """Get known license plates from configuration."""
     known_plates: set[str] = set()
