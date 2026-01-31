@@ -74,6 +74,7 @@ from . import (
     TEST_SENSOR_STEPS_ALL_ACTIVE_ENTITY_ID,
     TEST_SENSOR_STEPS_ALL_ENTITY_ID,
     TEST_SENSOR_STEPS_PERSON_ACTIVE_ENTITY_ID,
+    TEST_SENSOR_STEPS_PERSON_CLASSIFIER_OBJECT_CLASSIFICATION,
     TEST_SENSOR_STEPS_PERSON_ENTITY_ID,
     TEST_SERVER_VERSION,
     TEST_STATS,
@@ -1227,6 +1228,82 @@ async def test_object_classification_sensor_attributes(hass: HomeAssistant) -> N
         entity_state.attributes["friendly_name"]
         == "Front Door Person Classifier Object Classification"
     )
+
+
+async def test_zone_object_classification_sensor(hass: HomeAssistant) -> None:
+    """Test FrigateObjectClassificationSensor for zones."""
+    with patch(
+        "custom_components.frigate.sensor.async_call_later"
+    ) as mock_async_call_later:
+        await setup_mock_frigate_config_entry(hass)
+        async_fire_mqtt_message(hass, "frigate/available", "online")
+        await hass.async_block_till_done()
+
+        # Verify zone sensor exists
+        entity_state = hass.states.get(
+            TEST_SENSOR_STEPS_PERSON_CLASSIFIER_OBJECT_CLASSIFICATION
+        )
+        assert entity_state
+        assert entity_state.state == "unknown"
+
+        # Test that zone sensor receives classification when object is in zone
+        async_fire_mqtt_message(
+            hass,
+            "frigate/tracked_object_update",
+            json.dumps(
+                {
+                    "type": "classification",
+                    "id": "1607123955.475377-mxklsc",
+                    "camera": "front_door",
+                    "current_zones": ["steps"],
+                    "timestamp": 1607123958.748393,
+                    "model": "person_classifier",
+                    "sub_label": "red_shirt",
+                    "score": 0.87,
+                }
+            ),
+        )
+        await hass.async_block_till_done()
+
+        entity_state = hass.states.get(
+            TEST_SENSOR_STEPS_PERSON_CLASSIFIER_OBJECT_CLASSIFICATION
+        )
+        assert entity_state
+        assert entity_state.state == "Red Shirt"
+
+        # Test that zone sensor doesn't update when object is not in zone
+        async_fire_mqtt_message(
+            hass,
+            "frigate/tracked_object_update",
+            json.dumps(
+                {
+                    "type": "classification",
+                    "id": "1607123955.475377-another",
+                    "camera": "front_door",
+                    "current_zones": [],  # Not in steps zone
+                    "timestamp": 1607123958.748393,
+                    "model": "person_classifier",
+                    "sub_label": "delivery_person",
+                    "score": 0.87,
+                }
+            ),
+        )
+        await hass.async_block_till_done()
+
+        entity_state = hass.states.get(
+            TEST_SENSOR_STEPS_PERSON_CLASSIFIER_OBJECT_CLASSIFICATION
+        )
+        assert entity_state
+        # State should still be "Red Shirt", not updated
+        assert entity_state.state == "Red Shirt"
+
+        # Test that camera sensor still works independently
+        entity_state = hass.states.get(
+            TEST_SENSOR_FRONT_DOOR_PERSON_CLASSIFIER_OBJECT_CLASSIFICATION
+        )
+        assert entity_state
+        # Camera sensor should have been updated by last message
+        assert entity_state.state == "Delivery Person"
 
 
 async def test_review_status_sensor(hass: HomeAssistant) -> None:
