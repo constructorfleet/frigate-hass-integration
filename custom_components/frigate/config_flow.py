@@ -17,6 +17,8 @@ from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
 from .api import FrigateApiClient, FrigateApiClientError
 from .const import (
+    CONF_ENABLE_ATTRIBUTE_TRACKING,
+    CONF_ENABLE_SUBLABEL_SENSORS,
     CONF_ENABLE_WEBRTC,
     CONF_MEDIA_BROWSER_ENABLE,
     CONF_NOTIFICATION_PROXY_ENABLE,
@@ -202,6 +204,22 @@ class FrigateOptionsFlowHandler(config_entries.OptionsFlow):
                     0,
                 ),
             ): All(int, Range(min=0)),
+            # Whether to create sublabel sensors for custom object classifications
+            vol.Optional(
+                CONF_ENABLE_SUBLABEL_SENSORS,
+                default=self._config_entry.options.get(
+                    CONF_ENABLE_SUBLABEL_SENSORS,
+                    True,
+                ),
+            ): bool,
+            # Whether to add attribute tracking to object count and occupancy sensors
+            vol.Optional(
+                CONF_ENABLE_ATTRIBUTE_TRACKING,
+                default=self._config_entry.options.get(
+                    CONF_ENABLE_ATTRIBUTE_TRACKING,
+                    True,
+                ),
+            ): bool,
         }
 
         return self.async_show_form(step_id="init", data_schema=vol.Schema(schema))

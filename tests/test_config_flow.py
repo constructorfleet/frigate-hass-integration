@@ -9,6 +9,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.frigate.api import FrigateApiClientError
 from custom_components.frigate.const import (
+    CONF_ENABLE_ATTRIBUTE_TRACKING,
+    CONF_ENABLE_SUBLABEL_SENSORS,
     CONF_ENABLE_WEBRTC,
     CONF_MEDIA_BROWSER_ENABLE,
     CONF_NOTIFICATION_PROXY_ENABLE,
@@ -271,6 +273,8 @@ async def test_options_advanced(hass: HomeAssistant) -> None:
                 CONF_NOTIFICATION_PROXY_ENABLE: False,
                 CONF_NOTIFICATION_PROXY_EXPIRE_AFTER_SECONDS: 60,
                 CONF_MEDIA_BROWSER_ENABLE: False,
+                CONF_ENABLE_SUBLABEL_SENSORS: True,
+                CONF_ENABLE_ATTRIBUTE_TRACKING: False,
             },
         )
         await hass.async_block_till_done()
@@ -280,6 +284,8 @@ async def test_options_advanced(hass: HomeAssistant) -> None:
         assert result["data"][CONF_NOTIFICATION_PROXY_EXPIRE_AFTER_SECONDS] == 60
         assert not result["data"][CONF_NOTIFICATION_PROXY_ENABLE]
         assert not result["data"][CONF_MEDIA_BROWSER_ENABLE]
+        assert result["data"][CONF_ENABLE_SUBLABEL_SENSORS] is True
+        assert not result["data"][CONF_ENABLE_ATTRIBUTE_TRACKING]
 
 
 async def test_options(hass: HomeAssistant) -> None:

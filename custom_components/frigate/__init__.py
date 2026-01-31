@@ -211,6 +211,56 @@ def get_object_classification_models_and_cameras(
     return model_cameras
 
 
+def get_sublabel_classification_models_and_base_objects(
+    config: dict[str, Any],
+) -> dict[str, list[str]]:
+    """Get mapping of sublabel classification models to their base objects.
+    
+    Returns a dict where keys are model_keys and values are lists of base object types.
+    Example: {"person_classifier": ["person"], "dog_classifier": ["dog"]}
+    """
+    model_objects: dict[str, list[str]] = {}
+    classification_config = config.get("classification", {}).get("custom", {})
+
+    for model_key, model_config in classification_config.items():
+        object_config = model_config.get("object_config")
+
+        if object_config:
+            classification_type = object_config.get("classification_type")
+            # Only include models with sub_label classification type
+            if classification_type == "sub_label":
+                objects_to_classify = object_config.get("objects", [])
+                if objects_to_classify:
+                    model_objects[model_key] = objects_to_classify
+
+    return model_objects
+
+
+def get_attribute_classification_models_and_base_objects(
+    config: dict[str, Any],
+) -> dict[str, list[str]]:
+    """Get mapping of attribute classification models to their base objects.
+    
+    Returns a dict where keys are model_keys and values are lists of base object types.
+    Example: {"wastebin_orientation": ["wastebin"]}
+    """
+    model_objects: dict[str, list[str]] = {}
+    classification_config = config.get("classification", {}).get("custom", {})
+
+    for model_key, model_config in classification_config.items():
+        object_config = model_config.get("object_config")
+
+        if object_config:
+            classification_type = object_config.get("classification_type")
+            # Only include models with attribute classification type
+            if classification_type == "attribute":
+                objects_to_classify = object_config.get("objects", [])
+                if objects_to_classify:
+                    model_objects[model_key] = objects_to_classify
+
+    return model_objects
+
+
 def get_known_plates(config: dict[str, Any]) -> set[str]:
     """Get known license plates from configuration."""
     known_plates: set[str] = set()
@@ -222,6 +272,60 @@ def get_known_plates(config: dict[str, Any]) -> set[str]:
         known_plates.update(known_plates_config.keys())
 
     return known_plates
+
+
+def build_mqtt_topics_with_optional_tracking(
+    config: dict[str, Any],
+    cam_name: str,
+    obj_name: str,
+    primary_topic: str,
+    primary_callback: Callable,
+    secondary_callback: Callable | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Build MQTT topic configuration with optional tracked_object_update subscription.
+    
+    Args:
+        config: Frigate configuration
+        cam_name: Camera name (reserved for future filtering use)
+        obj_name: Object name to check for attribute models - this determines if
+                 the tracked_object_update topic should be subscribed to
+        primary_topic: Primary MQTT topic to subscribe to
+        primary_callback: Callback for primary topic
+        secondary_callback: Optional callback for tracked_object_update topic.
+                          If provided and attribute models exist for obj_name,
+                          the tracked_object_update topic will be added.
+        
+    Returns:
+        Dictionary of topic configurations for MQTT subscription
+    """
+    topics = {
+        "state_topic": {
+            "msg_callback": primary_callback,
+            "qos": 0,
+            "topic": primary_topic,
+            "encoding": None,
+        },
+    }
+    
+    # Add tracked_object_update subscription if there are attribute models for this object
+    # and a secondary callback is provided
+    if secondary_callback:
+        attribute_models_map = get_attribute_classification_models_and_base_objects(config)
+        has_attribute_models = any(
+            obj_name in base_objects 
+            for base_objects in attribute_models_map.values()
+        )
+        
+        if has_attribute_models:
+            mqtt_prefix = config.get("mqtt", {}).get("topic_prefix", "frigate")
+            topics["attribute_topic"] = {
+                "msg_callback": secondary_callback,
+                "qos": 0,
+                "topic": f"{mqtt_prefix}/tracked_object_update",
+                "encoding": None,
+            }
+    
+    return topics
 
 
 def get_cameras_zones_and_objects(config: dict[str, Any]) -> set[tuple[str, str]]:
