@@ -1661,7 +1661,7 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
 
             if data.get("camera") != self._actual_cam_name:
                 return
-            
+
             # For zone sensors, also check if the object is in the zone
             if self._cam_or_zone_name != self._actual_cam_name:
                 # This is a zone sensor, check if object is in the zone
@@ -1714,6 +1714,8 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
     @property
     def device_info(self) -> DeviceInfo:
         """Get device information."""
+        # Zones don't have a camera configuration page
+        cam_suffix = "" if self._cam_or_zone_name in get_zones(self._frigate_config) else self._cam_or_zone_name
         return {
             "identifiers": {
                 get_frigate_device_identifier(self._config_entry, self._cam_or_zone_name)
@@ -1721,7 +1723,7 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
             "via_device": get_frigate_device_identifier(self._config_entry),
             "name": get_friendly_name(self._cam_or_zone_name),
             "model": self._get_model(),
-            "configuration_url": f"{self._config_entry.data.get(CONF_URL)}/cameras/{self._cam_or_zone_name if self._cam_or_zone_name not in get_zones(self._frigate_config) else ''}",
+            "configuration_url": f"{self._config_entry.data.get(CONF_URL)}/cameras/{cam_suffix}",
             "manufacturer": NAME,
         }
 
