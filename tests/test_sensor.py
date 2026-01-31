@@ -1630,3 +1630,98 @@ async def test_global_plate_sensor_disabled_feature(hass: HomeAssistant) -> None
         unique_id = f"{TEST_CONFIG_ENTRY_ID}:sensor_global_plate:abc123"
         entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
         assert entity_id is None
+
+
+async def test_sublabel_count_sensor(hass: HomeAssistant) -> None:
+    """Test FrigateSublabelCountSensor is created and tracks sublabels."""
+    with patch("custom_components.frigate.sensor.async_call_later"):
+        await setup_mock_frigate_config_entry(hass)
+
+    # Verify sublabel sensors were created for person classifier
+    registry = er.async_get(hass)
+    
+    # Check for delivery_person sublabel count sensor
+    unique_id = f"{TEST_CONFIG_ENTRY_ID}:sensor_sublabel_count:front_door_person_person_classifier_delivery_person"
+    entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
+    assert entity_id is not None
+    
+    entity_state = hass.states.get(entity_id)
+    assert entity_state
+    assert entity_state.state == "0"
+    
+    # Simulate classification message
+    async_fire_mqtt_message(
+        hass,
+        "frigate/tracked_object_update",
+        json.dumps({
+            "type": "classification",
+            "camera": "front_door",
+            "model": "person_classifier",
+            "sub_label": "delivery_person",
+            "id": "test_object_1",
+        }),
+    )
+    await hass.async_block_till_done()
+    
+    entity_state = hass.states.get(entity_id)
+    assert entity_state
+    assert entity_state.state == "1"
+    
+    # Check for dog_a sublabel count sensor
+    unique_id = f"{TEST_CONFIG_ENTRY_ID}:sensor_sublabel_count:front_door_dog_dog_classifier_dog_a"
+    entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
+    assert entity_id is not None
+
+
+async def test_attribute_count_sensor(hass: HomeAssistant) -> None:
+    """Test FrigateObjectCountSensor tracks attribute classifications."""
+    with patch("custom_components.frigate.sensor.async_call_later"):
+        await setup_mock_frigate_config_entry(hass)
+
+    # Get the person count sensor
+    entity_state = hass.states.get(TEST_SENSOR_FRONT_DOOR_PERSON_ENTITY_ID)
+    assert entity_state
+    
+    async_fire_mqtt_message(hass, "frigate/available", "online")
+    await hass.async_block_till_done()
+    
+    # Initially no attributes
+    assert entity_state.attributes.get("standing") is None
+    assert entity_state.attributes.get("sitting") is None
+    
+    # Simulate attribute classification message
+    async_fire_mqtt_message(
+        hass,
+        "frigate/tracked_object_update",
+        json.dumps({
+            "type": "classification",
+            "camera": "front_door",
+            "model": "person_orientation",
+            "attribute": "standing",
+            "id": "person_1",
+        }),
+    )
+    await hass.async_block_till_done()
+    
+    entity_state = hass.states.get(TEST_SENSOR_FRONT_DOOR_PERSON_ENTITY_ID)
+    assert entity_state
+    assert entity_state.attributes.get("standing") == 1
+    
+    # Add another person with sitting attribute
+    async_fire_mqtt_message(
+        hass,
+        "frigate/tracked_object_update",
+        json.dumps({
+            "type": "classification",
+            "camera": "front_door",
+            "model": "person_orientation",
+            "attribute": "sitting",
+            "id": "person_2",
+        }),
+    )
+    await hass.async_block_till_done()
+    
+    entity_state = hass.states.get(TEST_SENSOR_FRONT_DOOR_PERSON_ENTITY_ID)
+    assert entity_state
+    assert entity_state.attributes.get("standing") == 1
+    assert entity_state.attributes.get("sitting") == 1

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
@@ -222,3 +223,93 @@ async def test_binary_sensors_setup_correctly_in_registry(
             TEST_BINARY_SENSOR_STEPS_ALL_OCCUPANCY_ENTITY_ID,
         },
     )
+
+
+async def test_sublabel_occupancy_sensor(hass: HomeAssistant) -> None:
+    """Test FrigateSublabelOccupancySensor is created and tracks sublabels."""
+    await setup_mock_frigate_config_entry(hass)
+
+    # Verify sublabel occupancy sensors were created for person classifier
+    registry = er.async_get(hass)
+    
+    # Check for delivery_person sublabel occupancy sensor
+    unique_id = f"{TEST_CONFIG_ENTRY_ID}:sublabel_occupancy_sensor:front_door_person_person_classifier_delivery_person"
+    entity_id = registry.async_get_entity_id("binary_sensor", DOMAIN, unique_id)
+    assert entity_id is not None
+    
+    entity_state = hass.states.get(entity_id)
+    assert entity_state
+    assert entity_state.state == "off"
+    
+    # Simulate classification message
+    async_fire_mqtt_message(
+        hass,
+        "frigate/tracked_object_update",
+        json.dumps({
+            "type": "classification",
+            "camera": "front_door",
+            "model": "person_classifier",
+            "sub_label": "delivery_person",
+            "id": "test_object_1",
+        }),
+    )
+    await hass.async_block_till_done()
+    
+    entity_state = hass.states.get(entity_id)
+    assert entity_state
+    assert entity_state.state == "on"
+    
+    # Check for dog_a sublabel occupancy sensor
+    unique_id = f"{TEST_CONFIG_ENTRY_ID}:sublabel_occupancy_sensor:front_door_dog_dog_classifier_dog_a"
+    entity_id = registry.async_get_entity_id("binary_sensor", DOMAIN, unique_id)
+    assert entity_id is not None
+
+
+async def test_attribute_occupancy_sensor(hass: HomeAssistant) -> None:
+    """Test FrigateObjectOccupancySensor tracks attribute classifications."""
+    await setup_mock_frigate_config_entry(hass)
+
+    # Get the person occupancy sensor
+    entity_state = hass.states.get(TEST_BINARY_SENSOR_FRONT_DOOR_PERSON_OCCUPANCY_ENTITY_ID)
+    assert entity_state
+    
+    # Initially no attributes
+    assert entity_state.attributes.get("standing") is None
+    assert entity_state.attributes.get("sitting") is None
+    
+    # Simulate attribute classification message
+    async_fire_mqtt_message(
+        hass,
+        "frigate/tracked_object_update",
+        json.dumps({
+            "type": "classification",
+            "camera": "front_door",
+            "model": "person_orientation",
+            "attribute": "standing",
+            "id": "person_1",
+        }),
+    )
+    await hass.async_block_till_done()
+    
+    entity_state = hass.states.get(TEST_BINARY_SENSOR_FRONT_DOOR_PERSON_OCCUPANCY_ENTITY_ID)
+    assert entity_state
+    assert entity_state.attributes.get("standing") == 1
+    
+    # Add another person with sitting attribute
+    async_fire_mqtt_message(
+        hass,
+        "frigate/tracked_object_update",
+        json.dumps({
+            "type": "classification",
+            "camera": "front_door",
+            "model": "person_orientation",
+            "attribute": "sitting",
+            "id": "person_2",
+        }),
+    )
+    await hass.async_block_till_done()
+    
+    entity_state = hass.states.get(TEST_BINARY_SENSOR_FRONT_DOOR_PERSON_OCCUPANCY_ENTITY_ID)
+    assert entity_state
+    assert entity_state.attributes.get("standing") == 1
+    assert entity_state.attributes.get("sitting") == 1

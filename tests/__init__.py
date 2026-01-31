@@ -150,6 +150,7 @@ TEST_CONFIG = {
                 "mask": None,
                 "track": [
                     "amazon",
+                    "dog",
                     "face",
                     "person",
                 ],  # need to have logo for tests
@@ -238,6 +239,20 @@ TEST_CONFIG = {
                 "object_config": {
                     "objects": ["person"],
                     "classification_type": "sub_label",
+                },
+            },
+            "dog_classifier": {
+                "threshold": 0.8,
+                "object_config": {
+                    "objects": ["dog"],
+                    "classification_type": "sub_label",
+                },
+            },
+            "person_orientation": {
+                "threshold": 0.7,
+                "object_config": {
+                    "objects": ["person"],
+                    "classification_type": "attribute",
                 },
             },
         }
@@ -397,6 +412,17 @@ async def start_frigate_server(
 
 def create_mock_frigate_client() -> AsyncMock:
     """Create mock frigate client."""
+    
+    async def mock_get_classification_classes(model_key: str) -> list[str]:
+        """Mock get classification classes with different returns per model."""
+        if model_key == "person_classifier":
+            return ["delivery_person", "red_shirt"]
+        elif model_key == "dog_classifier":
+            return ["dog_a", "dog_b"]
+        elif model_key == "person_orientation":
+            return ["standing", "sitting"]
+        return []
+    
     mock_client = AsyncMock()
     mock_client.async_get_stats = AsyncMock(return_value=TEST_STATS)
     mock_client.async_get_config = AsyncMock(return_value=TEST_CONFIG)
@@ -404,7 +430,7 @@ def create_mock_frigate_client() -> AsyncMock:
     mock_client.async_get_version = AsyncMock(return_value=TEST_SERVER_VERSION)
     mock_client.async_get_faces = AsyncMock(return_value=["bob", "alice"])
     mock_client.async_get_classification_model_classes = AsyncMock(
-        return_value=["delivery_person", "red_shirt"]
+        side_effect=mock_get_classification_classes
     )
     return mock_client
 
