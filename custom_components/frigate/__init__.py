@@ -211,6 +211,43 @@ def get_object_classification_models_and_cameras(
     return model_cameras
 
 
+def get_object_classification_models_cameras_and_zones(
+    config: dict[str, Any],
+) -> set[tuple[str, str, str]]:
+    """Get object classification models with cameras/zones tuples.
+    
+    Returns a set of tuples: (camera_or_zone_name, model_key, camera_name)
+    where camera_name is the actual camera (used for MQTT filtering).
+    """
+    model_items = set()
+    classification_config = config.get("classification", {}).get("custom", {})
+
+    for model_key, model_config in classification_config.items():
+        object_config = model_config.get("object_config")
+
+        if object_config:
+            # Get the objects this model classifies
+            objects_to_classify = object_config.get("objects", [])
+
+            # Find cameras that track these objects
+            for cam_name, cam_config in config.get("cameras", {}).items():
+                tracked_objects = cam_config.get("objects", {}).get("track", [])
+
+                # If any of the objects to classify are tracked by this camera, add it
+                if any(obj in tracked_objects for obj in objects_to_classify):
+                    # Add camera entry
+                    model_items.add((cam_name, model_key, cam_name))
+                    
+                    # Add zone entries for this camera
+                    for zone_name, zone_config in cam_config.get("zones", {}).items():
+                        zone_objects = zone_config.get("objects")
+                        # If zone doesn't specify objects or includes any of the classified objects
+                        if not zone_objects or any(obj in zone_objects for obj in objects_to_classify):
+                            model_items.add((zone_name, model_key, cam_name))
+
+    return model_items
+
+
 def get_sublabel_classification_models_and_base_objects(
     config: dict[str, Any],
 ) -> dict[str, list[str]]:

@@ -43,6 +43,7 @@ from . import (
     get_frigate_entity_unique_id,
     get_known_plates,
     get_object_classification_models_and_cameras,
+    get_object_classification_models_cameras_and_zones,
     get_sublabel_classification_models_and_base_objects,
     get_zones,
     verify_frigate_version,
@@ -291,9 +292,9 @@ async def async_setup_entry(
         entities.extend(
             [
                 FrigateObjectClassificationSensor(
-                    entry, frigate_config, cam_name, model_key
+                    entry, frigate_config, cam_or_zone_name, model_key, actual_cam_name
                 )
-                for cam_name, model_key in get_object_classification_models_and_cameras(
+                for cam_or_zone_name, model_key, actual_cam_name in get_object_classification_models_cameras_and_zones(
                     frigate_config
                 )
             ]
@@ -1619,15 +1620,19 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
         self,
         config_entry: ConfigEntry,
         frigate_config: dict[str, Any],
-        cam_name: str,
+        cam_or_zone_name: str,
         model_key: str,
+        actual_cam_name: str | None = None,
     ) -> None:
         """Construct a FrigateObjectClassificationSensor."""
-        self._cam_name = cam_name
+        self._cam_or_zone_name = cam_or_zone_name
         self._model_key = model_key
         self._state = "Unknown"
         self._frigate_config = frigate_config
         self._clear_state_callable: Callable | None = None
+        # If actual_cam_name is provided, this is a zone sensor and we need to filter by camera
+        # For backward compatibility, if actual_cam_name is None, use cam_or_zone_name
+        self._actual_cam_name = actual_cam_name if actual_cam_name is not None else cam_or_zone_name
 
         super().__init__(
             config_entry,
@@ -1654,8 +1659,15 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
             if data.get("type") != "classification":
                 return
 
-            if data.get("camera") != self._cam_name:
+            if data.get("camera") != self._actual_cam_name:
                 return
+
+            # For zone sensors, also check if the object is in the zone
+            if self._cam_or_zone_name != self._actual_cam_name:
+                # This is a zone sensor, check if object is in the zone
+                current_zones = data.get("current_zones", [])
+                if self._cam_or_zone_name not in current_zones:
+                    return
 
             if data.get("model") != self._model_key:
                 return
@@ -1696,20 +1708,22 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
         return get_frigate_entity_unique_id(
             self._config_entry.entry_id,
             "sensor_object_classification",
-            f"{self._cam_name}_{self._model_key}",
+            f"{self._cam_or_zone_name}_{self._model_key}",
         )
 
     @property
     def device_info(self) -> DeviceInfo:
         """Get device information."""
+        # Zones don't have a camera configuration page
+        cam_suffix = "" if self._cam_or_zone_name in get_zones(self._frigate_config) else self._cam_or_zone_name
         return {
             "identifiers": {
-                get_frigate_device_identifier(self._config_entry, self._cam_name)
+                get_frigate_device_identifier(self._config_entry, self._cam_or_zone_name)
             },
             "via_device": get_frigate_device_identifier(self._config_entry),
-            "name": get_friendly_name(self._cam_name),
+            "name": get_friendly_name(self._cam_or_zone_name),
             "model": self._get_model(),
-            "configuration_url": f"{self._config_entry.data.get(CONF_URL)}/cameras/{self._cam_name}",
+            "configuration_url": f"{self._config_entry.data.get(CONF_URL)}/cameras/{cam_suffix}",
             "manufacturer": NAME,
         }
 
