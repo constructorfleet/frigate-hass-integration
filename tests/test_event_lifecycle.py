@@ -14,6 +14,44 @@ from . import (
 )
 
 
+async def test_attribute_tracking_from_events(hass: HomeAssistant) -> None:
+    """Test that object IDs are added from frigate/events topic."""
+    await setup_mock_frigate_config_entry(hass)
+
+    async_fire_mqtt_message(hass, "frigate/available", "online")
+    await hass.async_block_till_done()
+
+    # Simulate an event with attribute classification
+    async_fire_mqtt_message(
+        hass,
+        "frigate/events",
+        json.dumps(
+            {
+                "before": {},
+                "after": {
+                    "id": "test_object_123",
+                    "camera": "front_door",
+                    "label": "person",
+                    "end_time": None,
+                    "current_attributes": [
+                        {
+                            "model": "person_orientation",
+                            "attribute": "standing",
+                            "score": 0.92,
+                        }
+                    ],
+                },
+            }
+        ),
+    )
+    await hass.async_block_till_done()
+
+    # Verify the attribute was tracked from the event
+    entity_state = hass.states.get(TEST_SENSOR_FRONT_DOOR_PERSON_ENTITY_ID)
+    assert entity_state
+    assert entity_state.attributes.get("standing") == 1
+
+
 async def test_attribute_removal_on_event_end(hass: HomeAssistant) -> None:
     """Test that object IDs are removed when event ends."""
     await setup_mock_frigate_config_entry(hass)
@@ -21,14 +59,14 @@ async def test_attribute_removal_on_event_end(hass: HomeAssistant) -> None:
     async_fire_mqtt_message(hass, "frigate/available", "online")
     await hass.async_block_till_done()
 
-    # Simulate an object with an attribute being tracked
+    # Simulate an object with an attribute being tracked via tracked_object_update
     async_fire_mqtt_message(
         hass,
         "frigate/tracked_object_update",
         json.dumps(
             {
                 "type": "classification",
-                "id": "test_object_123",
+                "id": "test_object_456",
                 "camera": "front_door",
                 "timestamp": 1607123958.748393,
                 "model": "person_orientation",
@@ -51,13 +89,15 @@ async def test_attribute_removal_on_event_end(hass: HomeAssistant) -> None:
         json.dumps(
             {
                 "before": {
-                    "id": "test_object_123",
+                    "id": "test_object_456",
                     "camera": "front_door",
+                    "label": "person",
                     "end_time": None,
                 },
                 "after": {
-                    "id": "test_object_123",
+                    "id": "test_object_456",
                     "camera": "front_door",
+                    "label": "person",
                     "end_time": 1607123970.123456,
                 },
             }
@@ -70,6 +110,41 @@ async def test_attribute_removal_on_event_end(hass: HomeAssistant) -> None:
     assert entity_state
     # After event ends, the attribute count should be 0
     assert entity_state.attributes.get("standing", 0) == 0
+
+
+async def test_sublabel_tracking_from_events(hass: HomeAssistant) -> None:
+    """Test that sublabel objects are added from frigate/events topic."""
+    await setup_mock_frigate_config_entry(hass)
+
+    async_fire_mqtt_message(hass, "frigate/available", "online")
+    await hass.async_block_till_done()
+
+    # Simulate an event with sublabel classification
+    async_fire_mqtt_message(
+        hass,
+        "frigate/events",
+        json.dumps(
+            {
+                "before": {},
+                "after": {
+                    "id": "test_object_789",
+                    "camera": "front_door",
+                    "label": "person",
+                    "end_time": None,
+                    "current_attributes": [
+                        {
+                            "model": "person_classifier",
+                            "sub_label": "delivery_person",
+                            "score": 0.87,
+                        }
+                    ],
+                },
+            }
+        ),
+    )
+    await hass.async_block_till_done()
+
+    # The sublabel should be tracked from the event
 
 
 async def test_sublabel_removal_on_event_end(hass: HomeAssistant) -> None:
@@ -86,7 +161,7 @@ async def test_sublabel_removal_on_event_end(hass: HomeAssistant) -> None:
         json.dumps(
             {
                 "type": "classification",
-                "id": "test_object_456",
+                "id": "test_object_101",
                 "camera": "front_door",
                 "current_zones": [],
                 "timestamp": 1607123958.748393,
@@ -105,13 +180,15 @@ async def test_sublabel_removal_on_event_end(hass: HomeAssistant) -> None:
         json.dumps(
             {
                 "before": {
-                    "id": "test_object_456",
+                    "id": "test_object_101",
                     "camera": "front_door",
+                    "label": "person",
                     "end_time": None,
                 },
                 "after": {
-                    "id": "test_object_456",
+                    "id": "test_object_101",
                     "camera": "front_door",
+                    "label": "person",
                     "end_time": 1607123970.123456,
                 },
             }
@@ -136,7 +213,7 @@ async def test_event_end_different_camera_ignored(hass: HomeAssistant) -> None:
         json.dumps(
             {
                 "type": "classification",
-                "id": "test_object_789",
+                "id": "test_object_202",
                 "camera": "front_door",
                 "timestamp": 1607123958.748393,
                 "model": "person_orientation",
@@ -159,13 +236,15 @@ async def test_event_end_different_camera_ignored(hass: HomeAssistant) -> None:
         json.dumps(
             {
                 "before": {
-                    "id": "test_object_789",
+                    "id": "test_object_202",
                     "camera": "other_camera",
+                    "label": "person",
                     "end_time": None,
                 },
                 "after": {
-                    "id": "test_object_789",
+                    "id": "test_object_202",
                     "camera": "other_camera",
+                    "label": "person",
                     "end_time": 1607123970.123456,
                 },
             }
@@ -179,8 +258,46 @@ async def test_event_end_different_camera_ignored(hass: HomeAssistant) -> None:
     assert entity_state.attributes.get("standing") == 1
 
 
-async def test_event_without_end_time_ignored(hass: HomeAssistant) -> None:
-    """Test that events without end_time are ignored."""
+async def test_event_without_end_time_tracks_object(hass: HomeAssistant) -> None:
+    """Test that events without end_time add objects to tracking."""
+    await setup_mock_frigate_config_entry(hass)
+
+    async_fire_mqtt_message(hass, "frigate/available", "online")
+    await hass.async_block_till_done()
+
+    # Simulate an active event with attribute
+    async_fire_mqtt_message(
+        hass,
+        "frigate/events",
+        json.dumps(
+            {
+                "before": {},
+                "after": {
+                    "id": "test_object_303",
+                    "camera": "front_door",
+                    "label": "person",
+                    "end_time": None,  # Still active
+                    "current_attributes": [
+                        {
+                            "model": "person_orientation",
+                            "attribute": "walking",
+                            "score": 0.88,
+                        }
+                    ],
+                },
+            }
+        ),
+    )
+    await hass.async_block_till_done()
+
+    # The attribute should be tracked
+    entity_state = hass.states.get(TEST_SENSOR_FRONT_DOOR_PERSON_ENTITY_ID)
+    assert entity_state
+    assert entity_state.attributes.get("walking") == 1
+
+
+async def test_event_end_different_label_ignored(hass: HomeAssistant) -> None:
+    """Test that events for different object labels are ignored."""
     await setup_mock_frigate_config_entry(hass)
 
     async_fire_mqtt_message(hass, "frigate/available", "online")
@@ -193,7 +310,7 @@ async def test_event_without_end_time_ignored(hass: HomeAssistant) -> None:
         json.dumps(
             {
                 "type": "classification",
-                "id": "test_object_101",
+                "id": "test_object_404",
                 "camera": "front_door",
                 "timestamp": 1607123958.748393,
                 "model": "person_orientation",
@@ -209,28 +326,31 @@ async def test_event_without_end_time_ignored(hass: HomeAssistant) -> None:
     assert entity_state
     assert entity_state.attributes.get("standing") == 1
 
-    # Now simulate an event update without end_time
+    # Now simulate an event ending with a different label (e.g., dog)
     async_fire_mqtt_message(
         hass,
         "frigate/events",
         json.dumps(
             {
                 "before": {
-                    "id": "test_object_101",
+                    "id": "test_object_404",
                     "camera": "front_door",
+                    "label": "dog",
                     "end_time": None,
                 },
                 "after": {
-                    "id": "test_object_101",
+                    "id": "test_object_404",
                     "camera": "front_door",
-                    "end_time": None,  # Still no end_time
+                    "label": "dog",
+                    "end_time": 1607123970.123456,
                 },
             }
         ),
     )
     await hass.async_block_till_done()
 
-    # The attribute should still be there
+    # The attribute should still be there because it was a different object label
     entity_state = hass.states.get(TEST_SENSOR_FRONT_DOOR_PERSON_ENTITY_ID)
     assert entity_state
     assert entity_state.attributes.get("standing") == 1
+

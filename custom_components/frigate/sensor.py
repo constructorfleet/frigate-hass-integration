@@ -902,12 +902,11 @@ class FrigateObjectCountSensor(FrigateMQTTEntity, SensorEntity):
             if not after:
                 return
 
-            # Only process events for this camera
+            # Only process events for this camera and object type
             if after.get("camera") != self._cam_name:
                 return
             
-            # Check if event has ended (end_time is not null)
-            if after.get("end_time") is None:
+            if after.get("label") != self._obj_name:
                 return
             
             # Get the object ID
@@ -915,17 +914,52 @@ class FrigateObjectCountSensor(FrigateMQTTEntity, SensorEntity):
             if not object_id:
                 return
             
-            # Remove this object from our tracking
-            if object_id in self._tracked_object_attributes:
-                old_attribute = self._tracked_object_attributes.pop(object_id)
+            # Check if event has ended (end_time is not null)
+            end_time = after.get("end_time")
+            
+            if end_time is not None:
+                # Event ended - remove this object from our tracking
+                if object_id in self._tracked_object_attributes:
+                    old_attribute = self._tracked_object_attributes.pop(object_id)
+                    
+                    # Decrement the attribute count
+                    if old_attribute in self._attribute_counts:
+                        self._attribute_counts[old_attribute] = max(
+                            0, self._attribute_counts[old_attribute] - 1
+                        )
+                    
+                    self.async_write_ha_state()
+            else:
+                # Event is active - check if we have attribute data to track
+                # The event may contain current_attributes with classification data
+                current_attributes = after.get("current_attributes", [])
                 
-                # Decrement the attribute count
-                if old_attribute in self._attribute_counts:
-                    self._attribute_counts[old_attribute] = max(
-                        0, self._attribute_counts[old_attribute] - 1
-                    )
-                
-                self.async_write_ha_state()
+                # Look for attributes from our tracked models
+                for attr_data in current_attributes:
+                    if isinstance(attr_data, dict):
+                        model_key = attr_data.get("model")
+                        if model_key in self._attribute_models:
+                            attribute = attr_data.get("attribute")
+                            if attribute:
+                                # Update tracking
+                                old_attribute = self._tracked_object_attributes.get(object_id)
+                                
+                                # Decrement old attribute count
+                                if old_attribute and old_attribute in self._attribute_counts:
+                                    self._attribute_counts[old_attribute] = max(
+                                        0, self._attribute_counts[old_attribute] - 1
+                                    )
+                                
+                                # Update to new attribute
+                                self._tracked_object_attributes[object_id] = attribute
+                                
+                                # Increment new attribute count
+                                self._attribute_counts[attribute] = (
+                                    self._attribute_counts.get(attribute, 0) + 1
+                                )
+                                
+                                self.async_write_ha_state()
+                                break
 
         except (ValueError, KeyError):
             pass
@@ -1171,12 +1205,11 @@ class FrigateSublabelCountSensor(FrigateMQTTEntity, SensorEntity):
             if not after:
                 return
 
-            # Only process events for this camera
+            # Only process events for this camera and object type
             if after.get("camera") != self._cam_name:
                 return
             
-            # Check if event has ended (end_time is not null)
-            if after.get("end_time") is None:
+            if after.get("label") != self._obj_name:
                 return
             
             # Get the object ID
@@ -1184,16 +1217,42 @@ class FrigateSublabelCountSensor(FrigateMQTTEntity, SensorEntity):
             if not object_id:
                 return
             
-            # Remove this object from our tracking
-            if object_id in self._tracked_objects:
-                self._tracked_objects.pop(object_id)
+            # Check if event has ended (end_time is not null)
+            end_time = after.get("end_time")
+            
+            if end_time is not None:
+                # Event ended - remove this object from our tracking
+                if object_id in self._tracked_objects:
+                    self._tracked_objects.pop(object_id)
+                    
+                    # Recalculate count
+                    self._state = sum(
+                        1 for sl in self._tracked_objects.values() if sl == self._sublabel_class
+                    )
+                    
+                    self.async_write_ha_state()
+            else:
+                # Event is active - check if we have sublabel data to track
+                # The event may contain current_attributes with classification data
+                current_attributes = after.get("current_attributes", [])
                 
-                # Recalculate count
-                self._state = sum(
-                    1 for sl in self._tracked_objects.values() if sl == self._sublabel_class
-                )
-                
-                self.async_write_ha_state()
+                # Look for sublabels from our tracked model
+                for attr_data in current_attributes:
+                    if isinstance(attr_data, dict):
+                        model_key = attr_data.get("model")
+                        if model_key == self._model_key:
+                            sublabel = attr_data.get("sub_label")
+                            if sublabel:
+                                # Update our tracking of this object's sublabel
+                                self._tracked_objects[object_id] = sublabel
+                                
+                                # Recalculate count
+                                self._state = sum(
+                                    1 for sl in self._tracked_objects.values() if sl == self._sublabel_class
+                                )
+                                
+                                self.async_write_ha_state()
+                                break
 
         except (ValueError, KeyError):
             pass
