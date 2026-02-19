@@ -469,10 +469,6 @@ class FrigateSublabelOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
         This provides redundancy with tracked_object_update - objects can be added
         from either source. However, only events can remove objects when they end.
         """
-    
-    @callback
-    def _event_message_received(self, msg: ReceiveMessage) -> None:
-        """Handle event lifecycle messages from frigate/events topic."""
         try:
             data: dict[str, Any] = json.loads(msg.payload)
 
