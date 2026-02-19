@@ -318,6 +318,7 @@ def build_mqtt_topics_with_optional_tracking(
     primary_topic: str,
     primary_callback: Callable,
     secondary_callback: Callable | None = None,
+    events_callback: Callable | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Build MQTT topic configuration with optional tracked_object_update subscription.
     
@@ -331,6 +332,9 @@ def build_mqtt_topics_with_optional_tracking(
         secondary_callback: Optional callback for tracked_object_update topic.
                           If provided and attribute models exist for obj_name,
                           the tracked_object_update topic will be added.
+        events_callback: Optional callback for frigate/events topic.
+                        If provided, the events topic will be added to track
+                        object lifecycle (removal when end_time is not null).
         
     Returns:
         Dictionary of topic configurations for MQTT subscription
@@ -361,6 +365,16 @@ def build_mqtt_topics_with_optional_tracking(
                 "topic": f"{mqtt_prefix}/tracked_object_update",
                 "encoding": None,
             }
+    
+    # Add events topic subscription if an events callback is provided
+    if events_callback:
+        mqtt_prefix = config.get("mqtt", {}).get("topic_prefix", "frigate")
+        topics["events_topic"] = {
+            "msg_callback": events_callback,
+            "qos": 0,
+            "topic": f"{mqtt_prefix}/events",
+            "encoding": None,
+        }
     
     return topics
 

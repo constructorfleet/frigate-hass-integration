@@ -823,6 +823,7 @@ class FrigateObjectCountSensor(FrigateMQTTEntity, SensorEntity):
             primary_topic,
             self._state_message_received,
             self._attribute_message_received if self._attribute_models else None,
+            self._event_message_received if self._attribute_models else None,
         )
 
         super().__init__(
@@ -886,6 +887,40 @@ class FrigateObjectCountSensor(FrigateMQTTEntity, SensorEntity):
             )
             
             self.async_write_ha_state()
+
+        except (ValueError, KeyError):
+            pass
+    
+    @callback
+    def _event_message_received(self, msg: ReceiveMessage) -> None:
+        """Handle event lifecycle messages from frigate/events topic."""
+        try:
+            data: dict[str, Any] = json.loads(msg.payload)
+
+            # Only process events for this camera
+            if data.get("camera") != self._cam_name:
+                return
+            
+            # Check if event has ended (end_time is not null)
+            if data.get("end_time") is None:
+                return
+            
+            # Get the object ID
+            object_id = data.get("id")
+            if not object_id:
+                return
+            
+            # Remove this object from our tracking
+            if object_id in self._tracked_object_attributes:
+                old_attribute = self._tracked_object_attributes.pop(object_id)
+                
+                # Decrement the attribute count
+                if old_attribute in self._attribute_counts:
+                    self._attribute_counts[old_attribute] = max(
+                        0, self._attribute_counts[old_attribute] - 1
+                    )
+                
+                self.async_write_ha_state()
 
         except (ValueError, KeyError):
             pass
@@ -1070,6 +1105,15 @@ class FrigateSublabelCountSensor(FrigateMQTTEntity, SensorEntity):
                     ),
                     "encoding": None,
                 },
+                "events_topic": {
+                    "msg_callback": self._event_message_received,
+                    "qos": 0,
+                    "topic": (
+                        f"{self._frigate_config['mqtt']['topic_prefix']}"
+                        "/events"
+                    ),
+                    "encoding": None,
+                },
             },
         )
 
@@ -1107,6 +1151,39 @@ class FrigateSublabelCountSensor(FrigateMQTTEntity, SensorEntity):
                 1 for sl in self._tracked_objects.values() if sl == self._sublabel_class
             )
             self.async_write_ha_state()
+
+        except (ValueError, KeyError):
+            pass
+    
+    @callback
+    def _event_message_received(self, msg: ReceiveMessage) -> None:
+        """Handle event lifecycle messages from frigate/events topic."""
+        try:
+            data: dict[str, Any] = json.loads(msg.payload)
+
+            # Only process events for this camera
+            if data.get("camera") != self._cam_name:
+                return
+            
+            # Check if event has ended (end_time is not null)
+            if data.get("end_time") is None:
+                return
+            
+            # Get the object ID
+            object_id = data.get("id")
+            if not object_id:
+                return
+            
+            # Remove this object from our tracking
+            if object_id in self._tracked_objects:
+                self._tracked_objects.pop(object_id)
+                
+                # Recalculate count
+                self._state = sum(
+                    1 for sl in self._tracked_objects.values() if sl == self._sublabel_class
+                )
+                
+                self.async_write_ha_state()
 
         except (ValueError, KeyError):
             pass
