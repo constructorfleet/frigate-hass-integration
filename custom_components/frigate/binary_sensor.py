@@ -169,6 +169,7 @@ class FrigateObjectOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
             primary_topic,
             self._state_message_received,
             self._attribute_message_received if self._attribute_models else None,
+            self._event_message_received if self._attribute_models else None,
         )
 
         super().__init__(
@@ -188,7 +189,11 @@ class FrigateObjectOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
     
     @callback
     def _attribute_message_received(self, msg: ReceiveMessage) -> None:
-        """Handle attribute classification messages."""
+        """Handle attribute classification messages from tracked_object_update topic.
+        
+        This provides redundancy with the events topic - objects can be added to
+        tracking from either source to ensure nothing is missed.
+        """
         try:
             data: dict[str, Any] = json.loads(msg.payload)
 
@@ -232,6 +237,83 @@ class FrigateObjectOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
             )
             
             self.async_write_ha_state()
+
+        except (ValueError, KeyError):
+            pass
+    
+    @callback
+    def _event_message_received(self, msg: ReceiveMessage) -> None:
+        """Handle event lifecycle messages from frigate/events topic.
+        
+        This provides redundancy with tracked_object_update - objects can be added
+        from either source. However, only events can remove objects when they end.
+        """
+        try:
+            data: dict[str, Any] = json.loads(msg.payload)
+
+            # Event data is in the 'after' key
+            after = data.get("after")
+            if not after:
+                return
+
+            # Only process events for this camera and object type
+            if after.get("camera") != self._cam_name:
+                return
+            
+            if after.get("label") != self._obj_name:
+                return
+            
+            # Get the object ID
+            object_id = after.get("id")
+            if not object_id:
+                return
+            
+            # Check if event has ended (end_time is not null)
+            end_time = after.get("end_time")
+            
+            if end_time is not None:
+                # Event ended - remove this object from our tracking
+                if object_id in self._tracked_object_attributes:
+                    old_attribute = self._tracked_object_attributes.pop(object_id)
+                    
+                    # Decrement the attribute count
+                    if old_attribute in self._attribute_counts:
+                        self._attribute_counts[old_attribute] = max(
+                            0, self._attribute_counts[old_attribute] - 1
+                        )
+                    
+                    self.async_write_ha_state()
+            else:
+                # Event is active - check if we have attribute data to track
+                # The event may contain current_attributes with classification data
+                current_attributes = after.get("current_attributes", [])
+                
+                # Look for attributes from our tracked models
+                for attr_data in current_attributes:
+                    if isinstance(attr_data, dict):
+                        model_key = attr_data.get("model")
+                        if model_key in self._attribute_models:
+                            attribute = attr_data.get("attribute")
+                            if attribute:
+                                # Update tracking
+                                old_attribute = self._tracked_object_attributes.get(object_id)
+                                
+                                # Decrement old attribute count
+                                if old_attribute and old_attribute in self._attribute_counts:
+                                    self._attribute_counts[old_attribute] = max(
+                                        0, self._attribute_counts[old_attribute] - 1
+                                    )
+                                
+                                # Update to new attribute
+                                self._tracked_object_attributes[object_id] = attribute
+                                
+                                # Increment new attribute count
+                                self._attribute_counts[attribute] = (
+                                    self._attribute_counts.get(attribute, 0) + 1
+                                )
+                                
+                                self.async_write_ha_state()
+                                break
 
         except (ValueError, KeyError):
             pass
@@ -324,12 +406,25 @@ class FrigateSublabelOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
                     ),
                     "encoding": None,
                 },
+                "events_topic": {
+                    "msg_callback": self._event_message_received,
+                    "qos": 0,
+                    "topic": (
+                        f"{self._frigate_config['mqtt']['topic_prefix']}"
+                        "/events"
+                    ),
+                    "encoding": None,
+                },
             },
         )
 
     @callback
     def _state_message_received(self, msg: ReceiveMessage) -> None:
-        """Handle a new received MQTT state message."""
+        """Handle classification messages from tracked_object_update topic.
+        
+        This provides redundancy with the events topic - objects can be added to
+        tracking from either source to ensure nothing is missed.
+        """
         try:
             data: dict[str, Any] = json.loads(msg.payload)
 
@@ -363,6 +458,73 @@ class FrigateSublabelOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
             # Update occupancy state
             self._is_on = len(self._tracked_objects) > 0
             self.async_write_ha_state()
+
+        except (ValueError, KeyError):
+            pass
+    
+    @callback
+    def _event_message_received(self, msg: ReceiveMessage) -> None:
+        """Handle event lifecycle messages from frigate/events topic.
+        
+        This provides redundancy with tracked_object_update - objects can be added
+        from either source. However, only events can remove objects when they end.
+        """
+        try:
+            data: dict[str, Any] = json.loads(msg.payload)
+
+            # Event data is in the 'after' key
+            after = data.get("after")
+            if not after:
+                return
+
+            # Only process events for this camera and object type
+            if after.get("camera") != self._cam_name:
+                return
+            
+            if after.get("label") != self._obj_name:
+                return
+            
+            # Get the object ID
+            object_id = after.get("id")
+            if not object_id:
+                return
+            
+            # Check if event has ended (end_time is not null)
+            end_time = after.get("end_time")
+            
+            if end_time is not None:
+                # Event ended - remove this object from our tracking
+                if object_id in self._tracked_objects:
+                    self._tracked_objects.discard(object_id)
+                    
+                    # Update occupancy state
+                    self._is_on = len(self._tracked_objects) > 0
+                    
+                    self.async_write_ha_state()
+            else:
+                # Event is active - check if we have sublabel data to track
+                # The event may contain current_attributes with classification data
+                current_attributes = after.get("current_attributes", [])
+                
+                # Look for sublabels from our tracked model
+                for attr_data in current_attributes:
+                    if isinstance(attr_data, dict):
+                        model_key = attr_data.get("model")
+                        if model_key == self._model_key:
+                            sublabel = attr_data.get("sub_label")
+                            if sublabel:
+                                # Update our tracking of objects with this sublabel
+                                if sublabel == self._sublabel_class:
+                                    self._tracked_objects.add(object_id)
+                                else:
+                                    # Object has a different sublabel, remove from our tracking
+                                    self._tracked_objects.discard(object_id)
+                                
+                                # Update occupancy state
+                                self._is_on = len(self._tracked_objects) > 0
+                                
+                                self.async_write_ha_state()
+                                break
 
         except (ValueError, KeyError):
             pass
