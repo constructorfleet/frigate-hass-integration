@@ -843,7 +843,11 @@ class FrigateObjectCountSensor(FrigateMQTTEntity, SensorEntity):
     
     @callback
     def _attribute_message_received(self, msg: ReceiveMessage) -> None:
-        """Handle attribute classification messages."""
+        """Handle attribute classification messages from tracked_object_update topic.
+        
+        This provides redundancy with the events topic - objects can be added to
+        tracking from either source to ensure nothing is missed.
+        """
         try:
             data: dict[str, Any] = json.loads(msg.payload)
 
@@ -893,7 +897,11 @@ class FrigateObjectCountSensor(FrigateMQTTEntity, SensorEntity):
     
     @callback
     def _event_message_received(self, msg: ReceiveMessage) -> None:
-        """Handle event lifecycle messages from frigate/events topic."""
+        """Handle event lifecycle messages from frigate/events topic.
+        
+        This provides redundancy with tracked_object_update - objects can be added
+        from either source. However, only events can remove objects when they end.
+        """
         try:
             data: dict[str, Any] = json.loads(msg.payload)
 
@@ -1158,7 +1166,11 @@ class FrigateSublabelCountSensor(FrigateMQTTEntity, SensorEntity):
 
     @callback
     def _state_message_received(self, msg: ReceiveMessage) -> None:
-        """Handle a new received MQTT state message."""
+        """Handle classification messages from tracked_object_update topic.
+        
+        This provides redundancy with the events topic - objects can be added to
+        tracking from either source to ensure nothing is missed.
+        """
         try:
             data: dict[str, Any] = json.loads(msg.payload)
 
@@ -1196,7 +1208,11 @@ class FrigateSublabelCountSensor(FrigateMQTTEntity, SensorEntity):
     
     @callback
     def _event_message_received(self, msg: ReceiveMessage) -> None:
-        """Handle event lifecycle messages from frigate/events topic."""
+        """Handle event lifecycle messages from frigate/events topic.
+        
+        This provides redundancy with tracked_object_update - objects can be added
+        from either source. However, only events can remove objects when they end.
+        """
         try:
             data: dict[str, Any] = json.loads(msg.payload)
 
