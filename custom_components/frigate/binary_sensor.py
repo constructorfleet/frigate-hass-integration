@@ -243,16 +243,21 @@ class FrigateObjectOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
         try:
             data: dict[str, Any] = json.loads(msg.payload)
 
+            # Event data is in the 'after' key
+            after = data.get("after")
+            if not after:
+                return
+
             # Only process events for this camera
-            if data.get("camera") != self._cam_name:
+            if after.get("camera") != self._cam_name:
                 return
             
             # Check if event has ended (end_time is not null)
-            if data.get("end_time") is None:
+            if after.get("end_time") is None:
                 return
             
             # Get the object ID
-            object_id = data.get("id")
+            object_id = after.get("id")
             if not object_id:
                 return
             
@@ -417,16 +422,21 @@ class FrigateSublabelOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
         try:
             data: dict[str, Any] = json.loads(msg.payload)
 
+            # Event data is in the 'after' key
+            after = data.get("after")
+            if not after:
+                return
+
             # Only process events for this camera
-            if data.get("camera") != self._cam_name:
+            if after.get("camera") != self._cam_name:
                 return
             
             # Check if event has ended (end_time is not null)
-            if data.get("end_time") is None:
+            if after.get("end_time") is None:
                 return
             
             # Get the object ID
-            object_id = data.get("id")
+            object_id = after.get("id")
             if not object_id:
                 return
             
