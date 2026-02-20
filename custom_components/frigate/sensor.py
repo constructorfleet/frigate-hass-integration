@@ -1796,6 +1796,8 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
         # For backward compatibility, if actual_cam_name is None, use cam_or_zone_name
         self._actual_cam_name = actual_cam_name if actual_cam_name is not None else cam_or_zone_name
 
+        mqtt_prefix = self._frigate_config['mqtt']['topic_prefix']
+        
         super().__init__(
             config_entry,
             frigate_config,
@@ -1803,10 +1805,13 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
                 "state_topic": {
                     "msg_callback": self._state_message_received,
                     "qos": 0,
-                    "topic": (
-                        f"{self._frigate_config['mqtt']['topic_prefix']}"
-                        "/tracked_object_update"
-                    ),
+                    "topic": f"{mqtt_prefix}/tracked_object_update",
+                    "encoding": None,
+                },
+                "events_topic": {
+                    "msg_callback": self._event_message_received,
+                    "qos": 0,
+                    "topic": f"{mqtt_prefix}/events",
                     "encoding": None,
                 },
             },
@@ -1853,6 +1858,63 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
                 datetime.timedelta(seconds=60),
                 self.clear_classification,
             )
+
+        except (ValueError, KeyError):
+            pass
+
+    @callback
+    def _event_message_received(self, msg: ReceiveMessage) -> None:
+        """Handle event lifecycle messages from frigate/events topic."""
+        try:
+            data: dict[str, Any] = json.loads(msg.payload)
+
+            # Event data is in the 'after' key
+            after = data.get("after")
+            if not after:
+                return
+
+            # Only process events for this camera
+            if after.get("camera") != self._actual_cam_name:
+                return
+
+            # For zone sensors, check if the object is in the zone
+            if self._cam_or_zone_name != self._actual_cam_name:
+                # This is a zone sensor, check if object is in the zone
+                current_zones = after.get("current_zones", [])
+                if self._cam_or_zone_name not in current_zones:
+                    return
+
+            # Look for classification data in current_attributes
+            current_attributes = after.get("current_attributes", [])
+            
+            for attr_data in current_attributes:
+                if not isinstance(attr_data, dict):
+                    continue
+                    
+                model_key = attr_data.get("model")
+                if model_key != self._model_key:
+                    continue
+
+                # Extract sub_label or attribute from the classification data
+                if "sub_label" in attr_data:
+                    self._state = str(attr_data["sub_label"]).replace("_", " ").title()
+                elif "attribute" in attr_data:
+                    self._state = str(attr_data["attribute"]).replace("_", " ").title()
+                else:
+                    continue
+
+                self.async_write_ha_state()
+
+                if self._clear_state_callable:
+                    self._clear_state_callable()
+                    self._clear_state_callable = None
+
+                self._clear_state_callable = async_call_later(
+                    self.hass,
+                    datetime.timedelta(seconds=60),
+                    self.clear_classification,
+                )
+                break
 
         except (ValueError, KeyError):
             pass

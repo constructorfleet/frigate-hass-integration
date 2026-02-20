@@ -1306,6 +1306,88 @@ async def test_zone_object_classification_sensor(hass: HomeAssistant) -> None:
         assert entity_state.state == "Delivery Person"
 
 
+async def test_zone_object_classification_sensor_from_events(hass: HomeAssistant) -> None:
+    """Test FrigateObjectClassificationSensor for zones receives data from events topic."""
+    with patch(
+        "custom_components.frigate.sensor.async_call_later"
+    ) as mock_async_call_later:
+        await setup_mock_frigate_config_entry(hass)
+        async_fire_mqtt_message(hass, "frigate/available", "online")
+        await hass.async_block_till_done()
+
+        # Verify zone sensor exists
+        entity_state = hass.states.get(
+            TEST_SENSOR_STEPS_PERSON_CLASSIFIER_OBJECT_CLASSIFICATION
+        )
+        assert entity_state
+        assert entity_state.state == "unknown"
+
+        # Test that zone sensor receives classification from events topic
+        async_fire_mqtt_message(
+            hass,
+            "frigate/events",
+            json.dumps(
+                {
+                    "before": {},
+                    "after": {
+                        "id": "1607123955.475377-event1",
+                        "camera": "front_door",
+                        "label": "person",
+                        "end_time": None,
+                        "current_zones": ["steps"],
+                        "current_attributes": [
+                            {
+                                "model": "person_classifier",
+                                "sub_label": "blue_shirt",
+                                "score": 0.91,
+                            }
+                        ],
+                    },
+                }
+            ),
+        )
+        await hass.async_block_till_done()
+
+        entity_state = hass.states.get(
+            TEST_SENSOR_STEPS_PERSON_CLASSIFIER_OBJECT_CLASSIFICATION
+        )
+        assert entity_state
+        assert entity_state.state == "Blue Shirt"
+
+        # Test that zone sensor ignores events when object is not in the zone
+        async_fire_mqtt_message(
+            hass,
+            "frigate/events",
+            json.dumps(
+                {
+                    "before": {},
+                    "after": {
+                        "id": "1607123955.475377-event2",
+                        "camera": "front_door",
+                        "label": "person",
+                        "end_time": None,
+                        "current_zones": [],  # Not in steps zone
+                        "current_attributes": [
+                            {
+                                "model": "person_classifier",
+                                "sub_label": "yellow_shirt",
+                                "score": 0.88,
+                            }
+                        ],
+                    },
+                }
+            ),
+        )
+        await hass.async_block_till_done()
+
+        entity_state = hass.states.get(
+            TEST_SENSOR_STEPS_PERSON_CLASSIFIER_OBJECT_CLASSIFICATION
+        )
+        assert entity_state
+        # State should still be "Blue Shirt", not updated
+        assert entity_state.state == "Blue Shirt"
+
+
 async def test_review_status_sensor(hass: HomeAssistant) -> None:
     """Test FrigateReviewStatusSensor state."""
     await setup_mock_frigate_config_entry(hass)
