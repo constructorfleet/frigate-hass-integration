@@ -48,6 +48,7 @@ from . import (
     get_zones,
     verify_frigate_version,
 )
+from .api import FrigateApiClientError
 from .const import (
     ATTR_CLIENT,
     ATTR_CONFIG,
@@ -215,7 +216,7 @@ async def _create_attribute_sensors(
                                 attribute_class,
                             )
                         )
-        except Exception:
+        except FrigateApiClientError:
             _LOGGER.warning(
                 "Failed to fetch attribute classes for model %s. "
                 "Attribute count sensors will not be created for this model.",
@@ -1454,8 +1455,12 @@ class FrigateAttributeCountSensor(FrigateMQTTEntity, SensorEntity):
             )
             self.async_write_ha_state()
 
-        except (ValueError, KeyError):
-            pass
+        except (ValueError, KeyError) as e:
+            _LOGGER.debug(
+                "Failed to parse attribute classification message for %s: %s",
+                self._cam_name,
+                e,
+            )
     
     @callback
     def _event_message_received(self, msg: ReceiveMessage) -> None:
@@ -1521,8 +1526,12 @@ class FrigateAttributeCountSensor(FrigateMQTTEntity, SensorEntity):
                                 self.async_write_ha_state()
                                 break
 
-        except (ValueError, KeyError):
-            pass
+        except (ValueError, KeyError) as e:
+            _LOGGER.debug(
+                "Failed to parse event message for attribute tracking on %s: %s",
+                self._cam_name,
+                e,
+            )
 
     @property
     def unique_id(self) -> str:
