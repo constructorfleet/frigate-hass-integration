@@ -1877,9 +1877,11 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
             if after.get("camera") != self._actual_cam_name:
                 return
 
+            # Determine if this is a zone sensor
+            is_zone_sensor = self._cam_or_zone_name != self._actual_cam_name
+            
             # For zone sensors, check if the object is in the zone
-            if self._cam_or_zone_name != self._actual_cam_name:
-                # This is a zone sensor, check if object is in the zone
+            if is_zone_sensor:
                 current_zones = after.get("current_zones", [])
                 if self._cam_or_zone_name not in current_zones:
                     return
