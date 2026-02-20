@@ -1306,6 +1306,88 @@ async def test_zone_object_classification_sensor(hass: HomeAssistant) -> None:
         assert entity_state.state == "Delivery Person"
 
 
+async def test_zone_object_classification_sensor_from_events(hass: HomeAssistant) -> None:
+    """Test FrigateObjectClassificationSensor for zones receives data from events topic."""
+    with patch(
+        "custom_components.frigate.sensor.async_call_later"
+    ) as mock_async_call_later:
+        await setup_mock_frigate_config_entry(hass)
+        async_fire_mqtt_message(hass, "frigate/available", "online")
+        await hass.async_block_till_done()
+
+        # Verify zone sensor exists
+        entity_state = hass.states.get(
+            TEST_SENSOR_STEPS_PERSON_CLASSIFIER_OBJECT_CLASSIFICATION
+        )
+        assert entity_state
+        assert entity_state.state == "unknown"
+
+        # Test that zone sensor receives classification from events topic
+        async_fire_mqtt_message(
+            hass,
+            "frigate/events",
+            json.dumps(
+                {
+                    "before": {},
+                    "after": {
+                        "id": "1607123955.475377-event1",
+                        "camera": "front_door",
+                        "label": "person",
+                        "end_time": None,
+                        "current_zones": ["steps"],
+                        "current_attributes": [
+                            {
+                                "model": "person_classifier",
+                                "sub_label": "blue_shirt",
+                                "score": 0.91,
+                            }
+                        ],
+                    },
+                }
+            ),
+        )
+        await hass.async_block_till_done()
+
+        entity_state = hass.states.get(
+            TEST_SENSOR_STEPS_PERSON_CLASSIFIER_OBJECT_CLASSIFICATION
+        )
+        assert entity_state
+        assert entity_state.state == "Blue Shirt"
+
+        # Test that zone sensor ignores events when object is not in the zone
+        async_fire_mqtt_message(
+            hass,
+            "frigate/events",
+            json.dumps(
+                {
+                    "before": {},
+                    "after": {
+                        "id": "1607123955.475377-event2",
+                        "camera": "front_door",
+                        "label": "person",
+                        "end_time": None,
+                        "current_zones": [],  # Not in steps zone
+                        "current_attributes": [
+                            {
+                                "model": "person_classifier",
+                                "sub_label": "yellow_shirt",
+                                "score": 0.88,
+                            }
+                        ],
+                    },
+                }
+            ),
+        )
+        await hass.async_block_till_done()
+
+        entity_state = hass.states.get(
+            TEST_SENSOR_STEPS_PERSON_CLASSIFIER_OBJECT_CLASSIFICATION
+        )
+        assert entity_state
+        # State should still be "Blue Shirt", not updated
+        assert entity_state.state == "Blue Shirt"
+
+
 async def test_review_status_sensor(hass: HomeAssistant) -> None:
     """Test FrigateReviewStatusSensor state."""
     await setup_mock_frigate_config_entry(hass)
@@ -1750,6 +1832,88 @@ async def test_sublabel_count_sensor(hass: HomeAssistant) -> None:
     assert entity_id is not None
 
 
+async def test_attribute_class_count_sensor(hass: HomeAssistant) -> None:
+    """Test FrigateAttributeCountSensor is created and tracks attribute classes."""
+    with patch("custom_components.frigate.sensor.async_call_later"):
+        await setup_mock_frigate_config_entry(hass)
+
+    # Verify attribute count sensors were created for person_orientation model
+    registry = er.async_get(hass)
+    
+    # Check for standing attribute count sensor
+    unique_id = f"{TEST_CONFIG_ENTRY_ID}:sensor_attribute_count:front_door_person_person_orientation_standing"
+    entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
+    assert entity_id is not None
+    
+    entity_state = hass.states.get(entity_id)
+    assert entity_state
+    assert entity_state.state == "0"
+    
+    # Simulate classification message for standing person
+    async_fire_mqtt_message(
+        hass,
+        "frigate/tracked_object_update",
+        json.dumps({
+            "type": "classification",
+            "camera": "front_door",
+            "model": "person_orientation",
+            "attribute": "standing",
+            "id": "person_1",
+        }),
+    )
+    await hass.async_block_till_done()
+    
+    entity_state = hass.states.get(entity_id)
+    assert entity_state
+    assert entity_state.state == "1"
+    
+    # Add another standing person
+    async_fire_mqtt_message(
+        hass,
+        "frigate/tracked_object_update",
+        json.dumps({
+            "type": "classification",
+            "camera": "front_door",
+            "model": "person_orientation",
+            "attribute": "standing",
+            "id": "person_2",
+        }),
+    )
+    await hass.async_block_till_done()
+    
+    entity_state = hass.states.get(entity_id)
+    assert entity_state
+    assert entity_state.state == "2"
+    
+    # Check for sitting attribute count sensor
+    unique_id_sitting = f"{TEST_CONFIG_ENTRY_ID}:sensor_attribute_count:front_door_person_person_orientation_sitting"
+    entity_id_sitting = registry.async_get_entity_id("sensor", DOMAIN, unique_id_sitting)
+    assert entity_id_sitting is not None
+    
+    # Add a sitting person
+    async_fire_mqtt_message(
+        hass,
+        "frigate/tracked_object_update",
+        json.dumps({
+            "type": "classification",
+            "camera": "front_door",
+            "model": "person_orientation",
+            "attribute": "sitting",
+            "id": "person_3",
+        }),
+    )
+    await hass.async_block_till_done()
+    
+    entity_state_sitting = hass.states.get(entity_id_sitting)
+    assert entity_state_sitting
+    assert entity_state_sitting.state == "1"
+    
+    # Standing count should still be 2
+    entity_state = hass.states.get(entity_id)
+    assert entity_state
+    assert entity_state.state == "2"
+
+
 async def test_attribute_count_sensor(hass: HomeAssistant) -> None:
     """Test FrigateObjectCountSensor tracks attribute classifications."""
     with patch("custom_components.frigate.sensor.async_call_later"):
@@ -1826,6 +1990,32 @@ async def test_sublabel_sensors_disabled(hass: HomeAssistant) -> None:
     
     # Check that dog_a sublabel count sensor was not created
     unique_id = f"{TEST_CONFIG_ENTRY_ID}:sensor_sublabel_count:front_door_dog_dog_classifier_dog_a"
+    entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
+    assert entity_id is None
+
+
+async def test_attribute_class_count_sensors_disabled(hass: HomeAssistant) -> None:
+    """Test that attribute count sensors are not created when option is disabled."""
+    from custom_components.frigate.const import CONF_ENABLE_ATTRIBUTE_SENSORS
+    
+    # Create config entry with attribute sensors disabled
+    config_entry = create_mock_frigate_config_entry(
+        hass, options={CONF_ENABLE_ATTRIBUTE_SENSORS: False}
+    )
+    
+    with patch("custom_components.frigate.sensor.async_call_later"):
+        await setup_mock_frigate_config_entry(hass, config_entry=config_entry)
+
+    # Verify attribute count sensors were NOT created
+    registry = er.async_get(hass)
+    
+    # Check that standing attribute count sensor was not created
+    unique_id = f"{TEST_CONFIG_ENTRY_ID}:sensor_attribute_count:front_door_person_person_orientation_standing"
+    entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
+    assert entity_id is None
+    
+    # Check that sitting attribute count sensor was not created
+    unique_id = f"{TEST_CONFIG_ENTRY_ID}:sensor_attribute_count:front_door_person_person_orientation_sitting"
     entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
     assert entity_id is None
 
