@@ -25,6 +25,7 @@ from . import (
     TEST_CONFIG_ENTRY_ID,
     TEST_SERVER_VERSION,
     create_mock_frigate_client,
+    create_mock_frigate_config_entry,
     setup_mock_frigate_config_entry,
     verify_entities_are_setup_correctly_in_registry,
 )
@@ -228,6 +229,10 @@ async def test_binary_sensors_setup_correctly_in_registry(
 async def test_sublabel_occupancy_sensor(hass: HomeAssistant) -> None:
     """Test FrigateSublabelOccupancySensor is created and tracks sublabels."""
     await setup_mock_frigate_config_entry(hass)
+
+    # Bring MQTT online so sensors become available and initialise to off
+    async_fire_mqtt_message(hass, "frigate/available", "online")
+    await hass.async_block_till_done()
 
     # Verify sublabel occupancy sensors were created for person classifier
     registry = er.async_get(hass)

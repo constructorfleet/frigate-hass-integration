@@ -33,7 +33,6 @@ from . import (
     FrigateEntity,
     FrigateMQTTEntity,
     ReceiveMessage,
-    build_mqtt_topics_with_optional_tracking,
     get_attribute_classification_models_and_base_objects,
     get_cameras,
     get_cameras_zones_and_objects,
@@ -142,6 +141,15 @@ async def _create_global_object_classification_sensors(
                 )
 
 
+def _build_zone_to_camera_map(frigate_config: dict[str, Any]) -> dict[str, str]:
+    """Build a mapping of zone names to their parent camera name."""
+    zone_to_camera: dict[str, str] = {}
+    for cam_name, cam_config in frigate_config.get("cameras", {}).items():
+        for zone_name in cam_config.get("zones", {}):
+            zone_to_camera[zone_name] = cam_name
+    return zone_to_camera
+
+
 async def _create_sublabel_sensors(
     entry: ConfigEntry,
     frigate_config: dict[str, Any],
@@ -150,20 +158,17 @@ async def _create_sublabel_sensors(
 ) -> None:
     """Create count sensors for sublabel classifications."""
     sublabel_models = get_sublabel_classification_models_and_base_objects(frigate_config)
-    
+    zone_to_camera = _build_zone_to_camera_map(frigate_config)
+
     for model_key, base_objects in sublabel_models.items():
         try:
-            # Get the sublabel classes from the API
             classes = await client.async_get_classification_model_classes(model_key)
-            
-            # For each sublabel class, create sensors for each camera/zone where the base object could appear
+
             for sublabel_class in classes:
-                # Get all cameras and zones where the base object(s) are tracked
                 for cam_name, obj_name in get_cameras_zones_and_objects(frigate_config):
-                    # Only create sensors if this camera/zone tracks one of the base objects
                     if obj_name in base_objects:
-                        # Create a count sensor for this sublabel on this camera/zone
-                        # The sensor name will be like "Dog A Count" for camera "front_door"
+                        # Resolve the actual camera name for zone sensors
+                        actual_cam = zone_to_camera.get(cam_name, cam_name)
                         entities.append(
                             FrigateSublabelCountSensor(
                                 entry,
@@ -172,12 +177,50 @@ async def _create_sublabel_sensors(
                                 obj_name,
                                 model_key,
                                 sublabel_class,
+                                actual_cam_name=actual_cam,
                             )
                         )
         except Exception:
             _LOGGER.warning(
                 "Failed to fetch sublabel classes for model %s. "
                 "Sublabel count sensors will not be created for this model.",
+                model_key,
+            )
+
+
+async def _create_attribute_sensors(
+    entry: ConfigEntry,
+    frigate_config: dict[str, Any],
+    client: Any,
+    entities: list[FrigateEntity],
+) -> None:
+    """Create count sensors for attribute classifications."""
+    attribute_models = get_attribute_classification_models_and_base_objects(frigate_config)
+    zone_to_camera = _build_zone_to_camera_map(frigate_config)
+
+    for model_key, base_objects in attribute_models.items():
+        try:
+            classes = await client.async_get_classification_model_classes(model_key)
+
+            for attribute_class in classes:
+                for cam_name, obj_name in get_cameras_zones_and_objects(frigate_config):
+                    if obj_name in base_objects:
+                        actual_cam = zone_to_camera.get(cam_name, cam_name)
+                        entities.append(
+                            FrigateAttributeCountSensor(
+                                entry,
+                                frigate_config,
+                                cam_name,
+                                obj_name,
+                                model_key,
+                                attribute_class,
+                                actual_cam_name=actual_cam,
+                            )
+                        )
+        except Exception:
+            _LOGGER.warning(
+                "Failed to fetch attribute classes for model %s. "
+                "Attribute count sensors will not be created for this model.",
                 model_key,
             )
 
@@ -311,6 +354,7 @@ async def async_setup_entry(
         # Only create if the option is enabled (defaults to True)
         if entry.options.get(CONF_ENABLE_SUBLABEL_SENSORS, True):
             await _create_sublabel_sensors(entry, frigate_config, client, entities)
+            await _create_attribute_sensors(entry, frigate_config, client, entities)
 
     async_add_entities(entities)
 
@@ -795,36 +839,57 @@ class FrigateObjectCountSensor(FrigateMQTTEntity, SensorEntity):
         self._state = 0
         self._frigate_config = frigate_config
         self._icon = get_icon_from_type(self._obj_name)
-        # Track attribute classifications: attribute_name -> count
+        # Combined classification counts: value -> count
+        # Holds counts for both attribute and sublabel classifications.
         self._attribute_counts: dict[str, int] = {}
-        # Track object_id -> attribute mapping
-        # Note: Entries persist for object lifecycle. The primary count from the
-        # main MQTT topic remains authoritative. Attribute counts are supplementary.
-        self._tracked_object_attributes: dict[str, str] = {}
-        
-        # Find which attribute classification models apply to this object
-        # Only check if attribute tracking is enabled
-        self._attribute_models = []
+        # Per-model tracking: {model_key: {object_id: classification_value}}
+        # Allows an object to hold one classification per model simultaneously.
+        self._tracked_object_by_model: dict[str, dict[str, str]] = {}
+
+        # Find which classification models (attribute and sublabel) apply to
+        # this object.  Only populate when attribute tracking is enabled.
+        self._attribute_models: list[str] = []
+        self._sublabel_models: list[str] = []
         if enable_attribute_tracking:
             attribute_models_map = get_attribute_classification_models_and_base_objects(frigate_config)
             for model_key, base_objects in attribute_models_map.items():
                 if obj_name in base_objects:
                     self._attribute_models.append(model_key)
 
+            sublabel_models_map = get_sublabel_classification_models_and_base_objects(frigate_config)
+            for model_key, base_objects in sublabel_models_map.items():
+                if obj_name in base_objects:
+                    self._sublabel_models.append(model_key)
+
+        has_classification_models = bool(self._attribute_models or self._sublabel_models)
+
         primary_topic = (
             f"{self._frigate_config['mqtt']['topic_prefix']}"
             f"/{self._cam_name}/{self._obj_name}"
         )
-        
-        topics = build_mqtt_topics_with_optional_tracking(
-            frigate_config,
-            cam_name,
-            obj_name,
-            primary_topic,
-            self._state_message_received,
-            self._attribute_message_received if self._attribute_models else None,
-            self._event_message_received if self._attribute_models else None,
-        )
+
+        mqtt_prefix = self._frigate_config["mqtt"]["topic_prefix"]
+        topics: dict[str, Any] = {
+            "state_topic": {
+                "msg_callback": self._state_message_received,
+                "qos": 0,
+                "topic": primary_topic,
+                "encoding": None,
+            },
+        }
+        if has_classification_models:
+            topics["attribute_topic"] = {
+                "msg_callback": self._classification_message_received,
+                "qos": 0,
+                "topic": f"{mqtt_prefix}/tracked_object_update",
+                "encoding": None,
+            }
+            topics["events_topic"] = {
+                "msg_callback": self._event_message_received,
+                "qos": 0,
+                "topic": f"{mqtt_prefix}/events",
+                "encoding": None,
+            }
 
         super().__init__(
             config_entry,
@@ -840,134 +905,114 @@ class FrigateObjectCountSensor(FrigateMQTTEntity, SensorEntity):
             self.async_write_ha_state()
         except ValueError:
             pass
-    
+
+    def _update_classification(
+        self, model_key: str, object_id: str, value: str
+    ) -> bool:
+        """Update per-model classification tracking.  Returns True if changed."""
+        model_objects = self._tracked_object_by_model.setdefault(model_key, {})
+        old_value = model_objects.get(object_id)
+        if old_value == value:
+            return False
+        # Decrement the old count
+        if old_value is not None and old_value in self._attribute_counts:
+            self._attribute_counts[old_value] = max(
+                0, self._attribute_counts[old_value] - 1
+            )
+            if self._attribute_counts[old_value] == 0:
+                del self._attribute_counts[old_value]
+        # Increment the new count
+        model_objects[object_id] = value
+        self._attribute_counts[value] = self._attribute_counts.get(value, 0) + 1
+        return True
+
     @callback
-    def _attribute_message_received(self, msg: ReceiveMessage) -> None:
-        """Handle attribute classification messages from tracked_object_update topic.
-        
-        This provides redundancy with the events topic - objects can be added to
-        tracking from either source to ensure nothing is missed.
-        """
+    def _classification_message_received(self, msg: ReceiveMessage) -> None:
+        """Handle classification messages from tracked_object_update topic."""
         try:
             data: dict[str, Any] = json.loads(msg.payload)
 
-            # Only process classification messages for this camera
             if data.get("type") != "classification":
                 return
 
             if data.get("camera") != self._cam_name:
                 return
-            
-            # Check if this is one of our attribute models
+
             model_key = data.get("model")
-            if model_key not in self._attribute_models:
-                return
-
-            # Get the attribute from the message
-            attribute = data.get("attribute")
-            if not attribute:
-                return
-
-            # Get the object ID
             object_id = data.get("id")
             if not object_id:
                 return
 
-            # Update our tracking of this object's attribute
-            old_attribute = self._tracked_object_attributes.get(object_id)
-            
-            # Decrement old attribute count
-            if old_attribute and old_attribute in self._attribute_counts:
-                self._attribute_counts[old_attribute] = max(
-                    0, self._attribute_counts[old_attribute] - 1
-                )
-            
-            # Update to new attribute
-            self._tracked_object_attributes[object_id] = attribute
-            
-            # Increment new attribute count
-            self._attribute_counts[attribute] = (
-                self._attribute_counts.get(attribute, 0) + 1
-            )
-            
-            self.async_write_ha_state()
+            value: str | None = None
+            if model_key in self._attribute_models:
+                value = data.get("attribute")
+            elif model_key in self._sublabel_models:
+                value = data.get("sub_label")
+
+            if not value:
+                return
+
+            if self._update_classification(model_key, object_id, value):
+                self.async_write_ha_state()
 
         except (ValueError, KeyError):
             pass
-    
+
     @callback
     def _event_message_received(self, msg: ReceiveMessage) -> None:
-        """Handle event lifecycle messages from frigate/events topic.
-        
-        This provides redundancy with tracked_object_update - objects can be added
-        from either source. However, only events can remove objects when they end.
-        """
+        """Handle event lifecycle messages from frigate/events topic."""
         try:
             data: dict[str, Any] = json.loads(msg.payload)
 
-            # Event data is in the 'after' key
             after = data.get("after")
             if not after:
                 return
 
-            # Only process events for this camera and object type
             if after.get("camera") != self._cam_name:
                 return
-            
+
             if after.get("label") != self._obj_name:
                 return
-            
-            # Get the object ID
+
             object_id = after.get("id")
             if not object_id:
                 return
-            
-            # Check if event has ended (end_time is not null)
+
             end_time = after.get("end_time")
-            
+
             if end_time is not None:
-                # Event ended - remove this object from our tracking
-                if object_id in self._tracked_object_attributes:
-                    old_attribute = self._tracked_object_attributes.pop(object_id)
-                    
-                    # Decrement the attribute count
-                    if old_attribute in self._attribute_counts:
-                        self._attribute_counts[old_attribute] = max(
-                            0, self._attribute_counts[old_attribute] - 1
-                        )
-                    
+                # Object ended – remove from all model tracking
+                changed = False
+                for model_objects in self._tracked_object_by_model.values():
+                    if object_id in model_objects:
+                        old_value = model_objects.pop(object_id)
+                        if old_value in self._attribute_counts:
+                            self._attribute_counts[old_value] = max(
+                                0, self._attribute_counts[old_value] - 1
+                            )
+                            if self._attribute_counts[old_value] == 0:
+                                del self._attribute_counts[old_value]
+                        changed = True
+                if changed:
                     self.async_write_ha_state()
             else:
-                # Event is active - check if we have attribute data to track
-                # The event may contain current_attributes with classification data
+                # Event is active – pick up any classification data in the event
                 current_attributes = after.get("current_attributes", [])
-                
-                # Look for attributes from our tracked models
+                changed = False
                 for attr_data in current_attributes:
-                    if isinstance(attr_data, dict):
-                        model_key = attr_data.get("model")
-                        if model_key in self._attribute_models:
-                            attribute = attr_data.get("attribute")
-                            if attribute:
-                                # Update tracking
-                                old_attribute = self._tracked_object_attributes.get(object_id)
-                                
-                                # Decrement old attribute count
-                                if old_attribute and old_attribute in self._attribute_counts:
-                                    self._attribute_counts[old_attribute] = max(
-                                        0, self._attribute_counts[old_attribute] - 1
-                                    )
-                                
-                                # Update to new attribute
-                                self._tracked_object_attributes[object_id] = attribute
-                                
-                                # Increment new attribute count
-                                self._attribute_counts[attribute] = (
-                                    self._attribute_counts.get(attribute, 0) + 1
-                                )
-                                
-                                self.async_write_ha_state()
-                                break
+                    if not isinstance(attr_data, dict):
+                        continue
+                    model_key = attr_data.get("model")
+                    if model_key in self._attribute_models:
+                        value = attr_data.get("attribute")
+                    elif model_key in self._sublabel_models:
+                        value = attr_data.get("sub_label")
+                    else:
+                        continue
+                    if value and self._update_classification(model_key, object_id, value):
+                        changed = True
+                if changed:
+                    self.async_write_ha_state()
 
         except (ValueError, KeyError):
             pass
@@ -1009,13 +1054,11 @@ class FrigateObjectCountSensor(FrigateMQTTEntity, SensorEntity):
     def native_unit_of_measurement(self) -> str:
         """Return the native unit of measurement of the sensor."""
         return "objects"
-    
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
-        if self._attribute_counts:
-            return self._attribute_counts
-        return {}
+        return self._attribute_counts if self._attribute_counts else {}
 
     @property
     def icon(self) -> str:
@@ -1116,6 +1159,9 @@ class FrigateSublabelCountSensor(FrigateMQTTEntity, SensorEntity):
     """Frigate Sublabel Count Sensor class - counts objects with a specific sublabel."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
+    # Subclasses can override to handle "attribute" instead of "sub_label"
+    _classification_field: str = "sub_label"
+    _unique_id_type: str = "sensor_sublabel_count"
 
     def __init__(
         self,
@@ -1125,6 +1171,7 @@ class FrigateSublabelCountSensor(FrigateMQTTEntity, SensorEntity):
         obj_name: str,
         model_key: str,
         sublabel_class: str,
+        actual_cam_name: str | None = None,
     ) -> None:
         """Construct a FrigateSublabelCountSensor."""
         self._cam_name = cam_name
@@ -1134,11 +1181,17 @@ class FrigateSublabelCountSensor(FrigateMQTTEntity, SensorEntity):
         self._state = 0
         self._frigate_config = frigate_config
         self._icon = get_icon_from_type(self._obj_name)
-        # Track object_id -> sublabel mapping
-        # Note: Entries persist for object lifecycle. Classification messages
-        # are event-driven and objects may be reclassified over time.
+        # actual_cam_name is the real camera name when cam_name is a zone
+        self._actual_cam_name = actual_cam_name if actual_cam_name is not None else cam_name
+        self._is_zone = cam_name != self._actual_cam_name
+        # Track object_id -> classification value mapping.
+        # For zone sensors this spans the parent camera; zone membership is
+        # checked separately via _objects_in_zone.
         self._tracked_objects: dict[str, str] = {}
+        # For zone sensors: set of object IDs currently inside this zone
+        self._objects_in_zone: set[str] = set()
 
+        mqtt_prefix = self._frigate_config["mqtt"]["topic_prefix"]
         super().__init__(
             config_entry,
             frigate_config,
@@ -1146,127 +1199,120 @@ class FrigateSublabelCountSensor(FrigateMQTTEntity, SensorEntity):
                 "state_topic": {
                     "msg_callback": self._state_message_received,
                     "qos": 0,
-                    "topic": (
-                        f"{self._frigate_config['mqtt']['topic_prefix']}"
-                        "/tracked_object_update"
-                    ),
+                    "topic": f"{mqtt_prefix}/tracked_object_update",
                     "encoding": None,
                 },
                 "events_topic": {
                     "msg_callback": self._event_message_received,
                     "qos": 0,
-                    "topic": (
-                        f"{self._frigate_config['mqtt']['topic_prefix']}"
-                        "/events"
-                    ),
+                    "topic": f"{mqtt_prefix}/events",
                     "encoding": None,
                 },
             },
         )
 
+    def _recalculate_state(self) -> None:
+        """Recalculate and update the sensor count."""
+        if self._is_zone:
+            self._state = sum(
+                1
+                for oid, val in self._tracked_objects.items()
+                if val == self._sublabel_class and oid in self._objects_in_zone
+            )
+        else:
+            self._state = sum(
+                1 for val in self._tracked_objects.values() if val == self._sublabel_class
+            )
+
     @callback
     def _state_message_received(self, msg: ReceiveMessage) -> None:
-        """Handle classification messages from tracked_object_update topic.
-        
-        This provides redundancy with the events topic - objects can be added to
-        tracking from either source to ensure nothing is missed.
-        """
+        """Handle classification messages from tracked_object_update topic."""
         try:
             data: dict[str, Any] = json.loads(msg.payload)
 
-            # Only process classification messages for this camera/model
             if data.get("type") != "classification":
                 return
 
-            if data.get("camera") != self._cam_name:
+            # Filter by actual camera name (handles zone sensors correctly)
+            if data.get("camera") != self._actual_cam_name:
                 return
 
             if data.get("model") != self._model_key:
                 return
 
-            # Get the sublabel from the message
-            sublabel = data.get("sub_label")
-            if not sublabel:
+            # Get the classification value (sub_label or attribute)
+            value = data.get(self._classification_field)
+            if not value:
                 return
 
-            # Get the object ID
             object_id = data.get("id")
             if not object_id:
                 return
 
-            # Update our tracking of this object's sublabel
-            self._tracked_objects[object_id] = sublabel
+            # For zone sensors without cached zone data, fall back to
+            # current_zones in the classification message (if present)
+            if self._is_zone and object_id not in self._objects_in_zone:
+                current_zones = data.get("current_zones")
+                if current_zones is not None:
+                    if self._cam_name in current_zones:
+                        self._objects_in_zone.add(object_id)
+                    else:
+                        return
 
-            # Count how many tracked objects have our specific sublabel
-            self._state = sum(
-                1 for sl in self._tracked_objects.values() if sl == self._sublabel_class
-            )
+            self._tracked_objects[object_id] = value
+            self._recalculate_state()
             self.async_write_ha_state()
 
         except (ValueError, KeyError):
             pass
-    
+
     @callback
     def _event_message_received(self, msg: ReceiveMessage) -> None:
-        """Handle event lifecycle messages from frigate/events topic.
-        
-        This provides redundancy with tracked_object_update - objects can be added
-        from either source. However, only events can remove objects when they end.
-        """
+        """Handle event lifecycle messages from frigate/events topic."""
         try:
             data: dict[str, Any] = json.loads(msg.payload)
 
-            # Event data is in the 'after' key
             after = data.get("after")
             if not after:
                 return
 
-            # Only process events for this camera and object type
-            if after.get("camera") != self._cam_name:
+            # Filter by actual camera name (handles zone sensors correctly)
+            if after.get("camera") != self._actual_cam_name:
                 return
-            
+
             if after.get("label") != self._obj_name:
                 return
-            
-            # Get the object ID
+
             object_id = after.get("id")
             if not object_id:
                 return
-            
-            # Check if event has ended (end_time is not null)
+
             end_time = after.get("end_time")
-            
+
             if end_time is not None:
-                # Event ended - remove this object from our tracking
-                if object_id in self._tracked_objects:
-                    self._tracked_objects.pop(object_id)
-                    
-                    # Recalculate count
-                    self._state = sum(
-                        1 for sl in self._tracked_objects.values() if sl == self._sublabel_class
-                    )
-                    
-                    self.async_write_ha_state()
+                # Object ended – remove from all tracking
+                self._tracked_objects.pop(object_id, None)
+                self._objects_in_zone.discard(object_id)
+                self._recalculate_state()
+                self.async_write_ha_state()
             else:
-                # Event is active - check if we have sublabel data to track
-                # The event may contain current_attributes with classification data
+                # Object is active – update zone membership and check current_attributes
+                if self._is_zone:
+                    current_zones = after.get("current_zones", [])
+                    if self._cam_name in current_zones:
+                        self._objects_in_zone.add(object_id)
+                    else:
+                        self._objects_in_zone.discard(object_id)
+
+                # Also pick up classification data that may be in the event
                 current_attributes = after.get("current_attributes", [])
-                
-                # Look for sublabels from our tracked model
                 for attr_data in current_attributes:
                     if isinstance(attr_data, dict):
-                        model_key = attr_data.get("model")
-                        if model_key == self._model_key:
-                            sublabel = attr_data.get("sub_label")
-                            if sublabel:
-                                # Update our tracking of this object's sublabel
-                                self._tracked_objects[object_id] = sublabel
-                                
-                                # Recalculate count
-                                self._state = sum(
-                                    1 for sl in self._tracked_objects.values() if sl == self._sublabel_class
-                                )
-                                
+                        if attr_data.get("model") == self._model_key:
+                            value = attr_data.get(self._classification_field)
+                            if value:
+                                self._tracked_objects[object_id] = value
+                                self._recalculate_state()
                                 self.async_write_ha_state()
                                 break
 
@@ -1278,7 +1324,7 @@ class FrigateSublabelCountSensor(FrigateMQTTEntity, SensorEntity):
         """Return a unique ID to use for this entity."""
         return get_frigate_entity_unique_id(
             self._config_entry.entry_id,
-            "sensor_sublabel_count",
+            self._unique_id_type,
             f"{self._cam_name}_{self._obj_name}_{self._model_key}_{self._sublabel_class}",
         )
 
@@ -1315,6 +1361,13 @@ class FrigateSublabelCountSensor(FrigateMQTTEntity, SensorEntity):
     def icon(self) -> str:
         """Return the icon of the sensor."""
         return self._icon
+
+
+class FrigateAttributeCountSensor(FrigateSublabelCountSensor):
+    """Frigate Attribute Count Sensor - counts objects with a specific attribute classification."""
+
+    _classification_field = "attribute"
+    _unique_id_type = "sensor_attribute_count"
 
 
 class DeviceTempSensor(
@@ -1789,13 +1842,18 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
         """Construct a FrigateObjectClassificationSensor."""
         self._cam_or_zone_name = cam_or_zone_name
         self._model_key = model_key
-        self._state = "Unknown"
+        self._state: str | None = None
         self._frigate_config = frigate_config
-        self._clear_state_callable: Callable | None = None
         # If actual_cam_name is provided, this is a zone sensor and we need to filter by camera
         # For backward compatibility, if actual_cam_name is None, use cam_or_zone_name
         self._actual_cam_name = actual_cam_name if actual_cam_name is not None else cam_or_zone_name
+        self._is_zone = self._cam_or_zone_name != self._actual_cam_name
+        # Track object IDs that have been classified so we can clear state on lifecycle end
+        self._classified_objects: set[str] = set()
+        # For zone sensors, track which objects are currently in the zone
+        self._objects_in_zone: set[str] = set()
 
+        mqtt_prefix = self._frigate_config["mqtt"]["topic_prefix"]
         super().__init__(
             config_entry,
             frigate_config,
@@ -1803,10 +1861,13 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
                 "state_topic": {
                     "msg_callback": self._state_message_received,
                     "qos": 0,
-                    "topic": (
-                        f"{self._frigate_config['mqtt']['topic_prefix']}"
-                        "/tracked_object_update"
-                    ),
+                    "topic": f"{mqtt_prefix}/tracked_object_update",
+                    "encoding": None,
+                },
+                "events_topic": {
+                    "msg_callback": self._event_message_received,
+                    "qos": 0,
+                    "topic": f"{mqtt_prefix}/events",
                     "encoding": None,
                 },
             },
@@ -1824,15 +1885,23 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
             if data.get("camera") != self._actual_cam_name:
                 return
 
-            # For zone sensors, also check if the object is in the zone
-            if self._cam_or_zone_name != self._actual_cam_name:
-                # This is a zone sensor, check if object is in the zone
-                current_zones = data.get("current_zones", [])
-                if self._cam_or_zone_name not in current_zones:
-                    return
-
             if data.get("model") != self._model_key:
                 return
+
+            # For zone sensors, check if the object is currently in the zone.
+            # Use cached zone membership if available, otherwise fall back to
+            # current_zones in the classification message.
+            object_id = data.get("id")
+            if self._is_zone:
+                if object_id and object_id in self._classified_objects:
+                    # We already know about this object; use zone cache
+                    if object_id not in self._objects_in_zone:
+                        return
+                else:
+                    # Fall back to current_zones field in classification message
+                    current_zones = data.get("current_zones", [])
+                    if self._cam_or_zone_name not in current_zones:
+                        return
 
             # Extract sub_label or attribute from the payload
             if "sub_label" in data:
@@ -1842,27 +1911,50 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
             else:
                 return
 
+            if object_id:
+                self._classified_objects.add(object_id)
+
             self.async_write_ha_state()
-
-            if self._clear_state_callable:
-                self._clear_state_callable()
-                self._clear_state_callable = None
-
-            self._clear_state_callable = async_call_later(
-                self.hass,
-                datetime.timedelta(seconds=60),
-                self.clear_classification,
-            )
 
         except (ValueError, KeyError):
             pass
 
     @callback
-    def clear_classification(self, _now: datetime.datetime) -> None:
-        """Clears the current sensor state."""
-        self._state = "None"
-        self.async_write_ha_state()
-        self._clear_state_callable = None
+    def _event_message_received(self, msg: ReceiveMessage) -> None:
+        """Handle event lifecycle messages to track zone membership and object end."""
+        try:
+            data: dict[str, Any] = json.loads(msg.payload)
+
+            after = data.get("after")
+            if not after:
+                return
+
+            if after.get("camera") != self._actual_cam_name:
+                return
+
+            object_id = after.get("id")
+            if not object_id:
+                return
+
+            end_time = after.get("end_time")
+
+            if end_time is not None:
+                # Object ended – clean up tracking
+                self._classified_objects.discard(object_id)
+                self._objects_in_zone.discard(object_id)
+                if not self._classified_objects:
+                    self._state = None
+                    self.async_write_ha_state()
+            elif self._is_zone:
+                # Update zone membership from the event
+                current_zones = after.get("current_zones", [])
+                if self._cam_or_zone_name in current_zones:
+                    self._objects_in_zone.add(object_id)
+                else:
+                    self._objects_in_zone.discard(object_id)
+
+        except (ValueError, KeyError):
+            pass
 
     @property
     def unique_id(self) -> str:
@@ -1895,7 +1987,7 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
         return f"{get_friendly_name(self._model_key)} Object Classification"
 
     @property
-    def native_value(self) -> str:
+    def native_value(self) -> str | None:
         """Return the value of the sensor."""
         return self._state
 
