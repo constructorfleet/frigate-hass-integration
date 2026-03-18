@@ -1875,18 +1875,22 @@ async def test_attribute_class_count_sensor(hass: HomeAssistant) -> None:
     with patch("custom_components.frigate.sensor.async_call_later"):
         await setup_mock_frigate_config_entry(hass)
 
+    # Bring MQTT online so sensors become available and initialise to 0
+    async_fire_mqtt_message(hass, "frigate/available", "online")
+    await hass.async_block_till_done()
+
     # Verify attribute count sensors were created for person_orientation model
     registry = er.async_get(hass)
-    
+
     # Check for standing attribute count sensor
     unique_id = f"{TEST_CONFIG_ENTRY_ID}:sensor_attribute_count:front_door_person_person_orientation_standing"
     entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
     assert entity_id is not None
-    
+
     entity_state = hass.states.get(entity_id)
     assert entity_state
     assert entity_state.state == "0"
-    
+
     # Simulate classification message for standing person
     async_fire_mqtt_message(
         hass,
@@ -1900,11 +1904,11 @@ async def test_attribute_class_count_sensor(hass: HomeAssistant) -> None:
         }),
     )
     await hass.async_block_till_done()
-    
+
     entity_state = hass.states.get(entity_id)
     assert entity_state
     assert entity_state.state == "1"
-    
+
     # Add another standing person
     async_fire_mqtt_message(
         hass,
@@ -1918,16 +1922,16 @@ async def test_attribute_class_count_sensor(hass: HomeAssistant) -> None:
         }),
     )
     await hass.async_block_till_done()
-    
+
     entity_state = hass.states.get(entity_id)
     assert entity_state
     assert entity_state.state == "2"
-    
+
     # Check for sitting attribute count sensor
     unique_id_sitting = f"{TEST_CONFIG_ENTRY_ID}:sensor_attribute_count:front_door_person_person_orientation_sitting"
     entity_id_sitting = registry.async_get_entity_id("sensor", DOMAIN, unique_id_sitting)
     assert entity_id_sitting is not None
-    
+
     # Add a sitting person
     async_fire_mqtt_message(
         hass,
@@ -1941,11 +1945,11 @@ async def test_attribute_class_count_sensor(hass: HomeAssistant) -> None:
         }),
     )
     await hass.async_block_till_done()
-    
+
     entity_state_sitting = hass.states.get(entity_id_sitting)
     assert entity_state_sitting
     assert entity_state_sitting.state == "1"
-    
+
     # Standing count should still be 2
     entity_state = hass.states.get(entity_id)
     assert entity_state
@@ -2188,6 +2192,65 @@ async def test_attribute_count_sensors_created(hass: HomeAssistant) -> None:
 
     entity_state = hass.states.get(entity_id)
     assert entity_state
+    assert entity_state.state == "1"
+
+
+async def test_zone_attribute_count_sensor(hass: HomeAssistant) -> None:
+    """Test that zone-based FrigateAttributeCountSensor correctly filters by zone."""
+    await setup_mock_frigate_config_entry(hass)
+
+    async_fire_mqtt_message(hass, "frigate/available", "online")
+    await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+
+    # Check that a zone attribute count sensor was created for 'steps'
+    unique_id = f"{TEST_CONFIG_ENTRY_ID}:sensor_attribute_count:steps_person_person_orientation_standing"
+    entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
+    assert entity_id is not None
+
+    entity_state = hass.states.get(entity_id)
+    assert entity_state
+    assert entity_state.state == "0"
+
+    # Classification message from front_door with object in steps zone
+    async_fire_mqtt_message(
+        hass,
+        "frigate/tracked_object_update",
+        json.dumps({
+            "type": "classification",
+            "camera": "front_door",
+            "model": "person_orientation",
+            "attribute": "standing",
+            "id": "person_in_zone",
+            "current_zones": ["steps"],
+        }),
+    )
+    await hass.async_block_till_done()
+
+    entity_state = hass.states.get(entity_id)
+    assert entity_state
+    # Object is in steps zone – count should increase
+    assert entity_state.state == "1"
+
+    # Classification from the same camera but object NOT in steps zone
+    async_fire_mqtt_message(
+        hass,
+        "frigate/tracked_object_update",
+        json.dumps({
+            "type": "classification",
+            "camera": "front_door",
+            "model": "person_orientation",
+            "attribute": "standing",
+            "id": "person_not_in_zone",
+            "current_zones": [],
+        }),
+    )
+    await hass.async_block_till_done()
+
+    entity_state = hass.states.get(entity_id)
+    assert entity_state
+    # Object is NOT in steps zone – count should remain 1
     assert entity_state.state == "1"
 
 
