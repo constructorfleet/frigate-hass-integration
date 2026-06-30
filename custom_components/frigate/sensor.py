@@ -1620,6 +1620,13 @@ class FrigateRecognizedFaceSensor(FrigateMQTTEntity, SensorEntity):
         self.async_write_ha_state()
         self._clear_state_callable = None
 
+    async def async_will_remove_from_hass(self) -> None:
+        """Cleanup prior to hass removal."""
+        if self._clear_state_callable:
+            self._clear_state_callable()
+            self._clear_state_callable = None
+        await super().async_will_remove_from_hass()
+
     @property
     def unique_id(self) -> str:
         """Return a unique ID to use for this entity."""
@@ -1726,6 +1733,13 @@ class FrigateRecognizedPlateSensor(FrigateMQTTEntity, SensorEntity):
         self._state = "None"
         self.async_write_ha_state()
         self._clear_state_callable = None
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cleanup prior to hass removal."""
+        if self._clear_state_callable:
+            self._clear_state_callable()
+            self._clear_state_callable = None
+        await super().async_will_remove_from_hass()
 
     @property
     def unique_id(self) -> str:
@@ -2019,16 +2033,6 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
 
                 self._classified_objects.add(object_id)
                 self.async_write_ha_state()
-
-                if self._clear_state_callable:
-                    self._clear_state_callable()
-                    self._clear_state_callable = None
-
-                self._clear_state_callable = async_call_later(
-                    self.hass,
-                    datetime.timedelta(seconds=60),
-                    self.clear_classification,
-                )
                 break
 
         except (ValueError, KeyError):
@@ -2040,6 +2044,13 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
         self._state = "None"
         self.async_write_ha_state()
         self._clear_state_callable = None
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cleanup prior to hass removal."""
+        if self._clear_state_callable:
+            self._clear_state_callable()
+            self._clear_state_callable = None
+        await super().async_will_remove_from_hass()
 
     @property
     def unique_id(self) -> str:
