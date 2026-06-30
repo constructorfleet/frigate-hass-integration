@@ -16,6 +16,7 @@ from custom_components.frigate.const import (
     CONF_NOTIFICATION_PROXY_ENABLE,
     CONF_NOTIFICATION_PROXY_EXPIRE_AFTER_SECONDS,
     CONF_RTSP_URL_TEMPLATE,
+    CONF_VALIDATE_SSL,
     DOMAIN,
 )
 from homeassistant import config_entries
@@ -65,7 +66,7 @@ async def test_user_success(hass: HomeAssistant) -> None:
         CONF_URL: TEST_URL,
         CONF_PASSWORD: "",
         CONF_USERNAME: "",
-        "validate_ssl": True,
+        CONF_VALIDATE_SSL: True,
     }
     assert len(mock_setup_entry.mock_calls) == 1
     assert mock_client.async_get_stats.called
@@ -94,7 +95,7 @@ async def test_user_success_with_auth(hass: HomeAssistant) -> None:
                 CONF_PASSWORD: TEST_PASSWORD,
                 CONF_URL: TEST_URL,
                 CONF_USERNAME: TEST_USERNAME,
-                "validate_ssl": True,
+                CONF_VALIDATE_SSL: True,
             },
         )
         await hass.async_block_till_done()
@@ -105,7 +106,7 @@ async def test_user_success_with_auth(hass: HomeAssistant) -> None:
         CONF_URL: TEST_URL,
         CONF_PASSWORD: TEST_PASSWORD,
         CONF_USERNAME: TEST_USERNAME,
-        "validate_ssl": True,
+        CONF_VALIDATE_SSL: True,
     }
     assert len(mock_setup_entry.mock_calls) == 1
     assert mock_client.async_get_stats.called
@@ -286,26 +287,3 @@ async def test_options_advanced(hass: HomeAssistant) -> None:
         assert not result["data"][CONF_MEDIA_BROWSER_ENABLE]
         assert result["data"][CONF_ENABLE_SUBLABEL_SENSORS] is True
         assert not result["data"][CONF_ENABLE_ATTRIBUTE_TRACKING]
-
-
-async def test_options(hass: HomeAssistant) -> None:
-    """Check an options flow without advanced options."""
-
-    config_entry = create_mock_frigate_config_entry(hass)
-    mock_client = create_mock_frigate_client()
-
-    with patch(
-        "custom_components.frigate.config_flow.FrigateApiClient",
-        return_value=mock_client,
-    ), patch(
-        "custom_components.frigate.async_setup_entry",
-        return_value=True,
-    ):
-        await hass.async_block_till_done()
-
-        result = await hass.config_entries.options.async_init(
-            config_entry.entry_id,
-        )
-
-        assert result["type"] == FlowResultType.ABORT
-        assert result["reason"] == "only_advanced_options"

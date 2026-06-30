@@ -43,7 +43,7 @@ from homeassistant.core import (
     valid_entity_id,
 )
 from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er, llm
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.typing import ConfigType
@@ -57,11 +57,13 @@ from .const import (
     ATTR_CONFIG,
     ATTR_COORDINATOR,
     ATTR_END_TIME,
+    ATTR_LLM_UNREGISTER,
     ATTR_START_TIME,
     ATTR_WS_EVENT_PROXY,
     ATTR_WS_REVIEW_PROXY,
     CONF_CAMERA_STATIC_IMAGE_HEIGHT,
     CONF_RTMP_URL_TEMPLATE,
+    CONF_VALIDATE_SSL,
     DOMAIN,
     FRIGATE_RELEASES_URL,
     FRIGATE_VERSION_ERROR_CUTOFF,
@@ -73,6 +75,7 @@ from .const import (
     STATUS_RUNNING,
     STATUS_STARTING,
 )
+from .llm_functions import FrigateServiceAPI
 from .views import async_setup as views_async_setup
 from .ws_api import async_setup as ws_api_async_setup
 from .ws_proxy import WSEventProxy, WSReviewProxy
@@ -420,9 +423,9 @@ def get_zones(config: dict[str, Any]) -> set[str]:
     return cameras_zones
 
 
-def decode_if_necessary(data: str | bytes) -> str:
+def decode_if_necessary(data: str | bytes | bytearray) -> str:
     """Decode a string if necessary."""
-    return data.decode("utf-8") if isinstance(data, bytes) else data
+    return data.decode("utf-8") if isinstance(data, (bytes, bytearray)) else data
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -448,7 +451,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async_get_clientsession(hass),
         entry.data.get(CONF_USERNAME),
         entry.data.get(CONF_PASSWORD),
-        bool(entry.data.get("validate_ssl")),
+        entry.data.get(CONF_VALIDATE_SSL, True),
     )
     coordinator = FrigateDataUpdateCoordinator(hass, client=client)
     await coordinator.async_config_entry_first_refresh()
@@ -572,7 +575,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             and valid_entity_id(new_id)
             and not entity_registry.async_get(new_id)
         ):
-            new_name = f"{get_friendly_name(cam_name)} {obj_name} Count".title()
+            new_name = titlecase(f"{get_friendly_name(cam_name)} {obj_name} Count")
             entity_registry.async_update_entity(
                 entity_id=entity_id,
                 new_entity_id=new_id,
@@ -581,6 +584,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
+
+    # Register LLM API if Frigate 0.18+ and not already registered
+    if (
+        verify_frigate_version(config, "0.18")
+        and ATTR_LLM_UNREGISTER not in hass.data[DOMAIN]
+    ):
+        hass.data[DOMAIN][ATTR_LLM_UNREGISTER] = llm.async_register_api(
+            hass, FrigateServiceAPI(hass=hass)
+        )
 
     # Register review summarize service if Frigate version is 0.17+
     if verify_frigate_version(config, "0.17"):
@@ -665,6 +677,15 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
             .async_shutdown()
         )
         hass.data[DOMAIN].pop(config_entry.entry_id)
+
+        # Unregister LLM API if no more Frigate entries remain
+        remaining = {
+            k
+            for k, v in hass.data[DOMAIN].items()
+            if isinstance(v, dict) and ATTR_CLIENT in v
+        }
+        if not remaining and ATTR_LLM_UNREGISTER in hass.data[DOMAIN]:
+            hass.data[DOMAIN].pop(ATTR_LLM_UNREGISTER)()
 
     return unload_ok
 
