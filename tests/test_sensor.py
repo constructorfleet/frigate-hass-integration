@@ -1341,7 +1341,9 @@ async def test_zone_object_classification_sensor(hass: HomeAssistant) -> None:
     assert entity_state.state == "unknown"
 
 
-async def test_zone_object_classification_sensor_from_events(hass: HomeAssistant) -> None:
+async def test_zone_object_classification_sensor_from_events(
+    hass: HomeAssistant,
+) -> None:
     """Test FrigateObjectClassificationSensor for zones receives data from events topic."""
     with patch(
         "custom_components.frigate.sensor.async_call_later"
@@ -1850,20 +1852,22 @@ async def test_sublabel_count_sensor(hass: HomeAssistant) -> None:
     async_fire_mqtt_message(
         hass,
         "frigate/tracked_object_update",
-        json.dumps({
-            "type": "classification",
-            "camera": "front_door",
-            "model": "person_classifier",
-            "sub_label": "delivery_person",
-            "id": "test_object_1",
-        }),
+        json.dumps(
+            {
+                "type": "classification",
+                "camera": "front_door",
+                "model": "person_classifier",
+                "sub_label": "delivery_person",
+                "id": "test_object_1",
+            }
+        ),
     )
     await hass.async_block_till_done()
-    
+
     entity_state = hass.states.get(entity_id)
     assert entity_state
     assert entity_state.state == "1"
-    
+
     # Check for dog_a sublabel count sensor
     unique_id = f"{TEST_CONFIG_ENTRY_ID}:sensor_sublabel_count:front_door_dog_dog_classifier_dog_a"
     entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
@@ -1895,13 +1899,15 @@ async def test_attribute_class_count_sensor(hass: HomeAssistant) -> None:
     async_fire_mqtt_message(
         hass,
         "frigate/tracked_object_update",
-        json.dumps({
-            "type": "classification",
-            "camera": "front_door",
-            "model": "person_orientation",
-            "attribute": "standing",
-            "id": "person_1",
-        }),
+        json.dumps(
+            {
+                "type": "classification",
+                "camera": "front_door",
+                "model": "person_orientation",
+                "attribute": "standing",
+                "id": "person_1",
+            }
+        ),
     )
     await hass.async_block_till_done()
 
@@ -1913,13 +1919,15 @@ async def test_attribute_class_count_sensor(hass: HomeAssistant) -> None:
     async_fire_mqtt_message(
         hass,
         "frigate/tracked_object_update",
-        json.dumps({
-            "type": "classification",
-            "camera": "front_door",
-            "model": "person_orientation",
-            "attribute": "standing",
-            "id": "person_2",
-        }),
+        json.dumps(
+            {
+                "type": "classification",
+                "camera": "front_door",
+                "model": "person_orientation",
+                "attribute": "standing",
+                "id": "person_2",
+            }
+        ),
     )
     await hass.async_block_till_done()
 
@@ -1929,20 +1937,24 @@ async def test_attribute_class_count_sensor(hass: HomeAssistant) -> None:
 
     # Check for sitting attribute count sensor
     unique_id_sitting = f"{TEST_CONFIG_ENTRY_ID}:sensor_attribute_count:front_door_person_person_orientation_sitting"
-    entity_id_sitting = registry.async_get_entity_id("sensor", DOMAIN, unique_id_sitting)
+    entity_id_sitting = registry.async_get_entity_id(
+        "sensor", DOMAIN, unique_id_sitting
+    )
     assert entity_id_sitting is not None
 
     # Add a sitting person
     async_fire_mqtt_message(
         hass,
         "frigate/tracked_object_update",
-        json.dumps({
-            "type": "classification",
-            "camera": "front_door",
-            "model": "person_orientation",
-            "attribute": "sitting",
-            "id": "person_3",
-        }),
+        json.dumps(
+            {
+                "type": "classification",
+                "camera": "front_door",
+                "model": "person_orientation",
+                "attribute": "sitting",
+                "id": "person_3",
+            }
+        ),
     )
     await hass.async_block_till_done()
 
@@ -1963,46 +1975,50 @@ async def test_attribute_count_sensor(hass: HomeAssistant) -> None:
     # Get the person count sensor
     async_fire_mqtt_message(hass, "frigate/available", "online")
     await hass.async_block_till_done()
-    
+
     entity_state = hass.states.get(TEST_SENSOR_FRONT_DOOR_PERSON_ENTITY_ID)
     assert entity_state
-    
+
     # Initially no attributes
     assert entity_state.attributes.get("standing") is None
     assert entity_state.attributes.get("sitting") is None
-    
+
     # Simulate attribute classification message
     async_fire_mqtt_message(
         hass,
         "frigate/tracked_object_update",
-        json.dumps({
-            "type": "classification",
-            "camera": "front_door",
-            "model": "person_orientation",
-            "attribute": "standing",
-            "id": "person_1",
-        }),
+        json.dumps(
+            {
+                "type": "classification",
+                "camera": "front_door",
+                "model": "person_orientation",
+                "attribute": "standing",
+                "id": "person_1",
+            }
+        ),
     )
     await hass.async_block_till_done()
-    
+
     entity_state = hass.states.get(TEST_SENSOR_FRONT_DOOR_PERSON_ENTITY_ID)
     assert entity_state
     assert entity_state.attributes.get("standing") == 1
-    
+
     # Add another person with sitting attribute
     async_fire_mqtt_message(
         hass,
         "frigate/tracked_object_update",
-        json.dumps({
-            "type": "classification",
-            "camera": "front_door",
-            "model": "person_orientation",
-            "attribute": "sitting",
-            "id": "person_2",
-        }),
+        json.dumps(
+            {
+                "type": "classification",
+                "camera": "front_door",
+                "model": "person_orientation",
+                "attribute": "sitting",
+                "id": "person_2",
+            }
+        ),
     )
     await hass.async_block_till_done()
-    
+
     entity_state = hass.states.get(TEST_SENSOR_FRONT_DOOR_PERSON_ENTITY_ID)
     assert entity_state
     assert entity_state.attributes.get("standing") == 1
@@ -2037,23 +2053,23 @@ async def test_sublabel_sensors_disabled(hass: HomeAssistant) -> None:
 async def test_attribute_class_count_sensors_disabled(hass: HomeAssistant) -> None:
     """Test that attribute count sensors are not created when option is disabled."""
     from custom_components.frigate.const import CONF_ENABLE_ATTRIBUTE_SENSORS
-    
+
     # Create config entry with attribute sensors disabled
     config_entry = create_mock_frigate_config_entry(
         hass, options={CONF_ENABLE_ATTRIBUTE_SENSORS: False}
     )
-    
+
     with patch("custom_components.frigate.sensor.async_call_later"):
         await setup_mock_frigate_config_entry(hass, config_entry=config_entry)
 
     # Verify attribute count sensors were NOT created
     registry = er.async_get(hass)
-    
+
     # Check that standing attribute count sensor was not created
     unique_id = f"{TEST_CONFIG_ENTRY_ID}:sensor_attribute_count:front_door_person_person_orientation_standing"
     entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
     assert entity_id is None
-    
+
     # Check that sitting attribute count sensor was not created
     unique_id = f"{TEST_CONFIG_ENTRY_ID}:sensor_attribute_count:front_door_person_person_orientation_sitting"
     entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
@@ -2074,24 +2090,26 @@ async def test_attribute_tracking_disabled(hass: HomeAssistant) -> None:
     # Get the person count sensor
     async_fire_mqtt_message(hass, "frigate/available", "online")
     await hass.async_block_till_done()
-    
+
     entity_state = hass.states.get(TEST_SENSOR_FRONT_DOOR_PERSON_ENTITY_ID)
     assert entity_state
-    
+
     # Simulate attribute classification message
     async_fire_mqtt_message(
         hass,
         "frigate/tracked_object_update",
-        json.dumps({
-            "type": "classification",
-            "camera": "front_door",
-            "model": "person_orientation",
-            "attribute": "standing",
-            "id": "person_1",
-        }),
+        json.dumps(
+            {
+                "type": "classification",
+                "camera": "front_door",
+                "model": "person_orientation",
+                "attribute": "standing",
+                "id": "person_1",
+            }
+        ),
     )
     await hass.async_block_till_done()
-    
+
     # Verify attributes were NOT added (because tracking is disabled)
     entity_state = hass.states.get(TEST_SENSOR_FRONT_DOOR_PERSON_ENTITY_ID)
     assert entity_state
@@ -2121,14 +2139,16 @@ async def test_zone_sublabel_count_sensor(hass: HomeAssistant) -> None:
     async_fire_mqtt_message(
         hass,
         "frigate/tracked_object_update",
-        json.dumps({
-            "type": "classification",
-            "camera": "front_door",
-            "model": "person_classifier",
-            "sub_label": "delivery_person",
-            "id": "person_in_zone",
-            "current_zones": ["steps"],
-        }),
+        json.dumps(
+            {
+                "type": "classification",
+                "camera": "front_door",
+                "model": "person_classifier",
+                "sub_label": "delivery_person",
+                "id": "person_in_zone",
+                "current_zones": ["steps"],
+            }
+        ),
     )
     await hass.async_block_till_done()
 
@@ -2141,14 +2161,16 @@ async def test_zone_sublabel_count_sensor(hass: HomeAssistant) -> None:
     async_fire_mqtt_message(
         hass,
         "frigate/tracked_object_update",
-        json.dumps({
-            "type": "classification",
-            "camera": "front_door",
-            "model": "person_classifier",
-            "sub_label": "delivery_person",
-            "id": "person_not_in_zone",
-            "current_zones": [],
-        }),
+        json.dumps(
+            {
+                "type": "classification",
+                "camera": "front_door",
+                "model": "person_classifier",
+                "sub_label": "delivery_person",
+                "id": "person_not_in_zone",
+                "current_zones": [],
+            }
+        ),
     )
     await hass.async_block_till_done()
 
@@ -2180,13 +2202,15 @@ async def test_attribute_count_sensors_created(hass: HomeAssistant) -> None:
     async_fire_mqtt_message(
         hass,
         "frigate/tracked_object_update",
-        json.dumps({
-            "type": "classification",
-            "camera": "front_door",
-            "model": "person_orientation",
-            "attribute": "standing",
-            "id": "person_1",
-        }),
+        json.dumps(
+            {
+                "type": "classification",
+                "camera": "front_door",
+                "model": "person_orientation",
+                "attribute": "standing",
+                "id": "person_1",
+            }
+        ),
     )
     await hass.async_block_till_done()
 
@@ -2217,14 +2241,16 @@ async def test_zone_attribute_count_sensor(hass: HomeAssistant) -> None:
     async_fire_mqtt_message(
         hass,
         "frigate/tracked_object_update",
-        json.dumps({
-            "type": "classification",
-            "camera": "front_door",
-            "model": "person_orientation",
-            "attribute": "standing",
-            "id": "person_in_zone",
-            "current_zones": ["steps"],
-        }),
+        json.dumps(
+            {
+                "type": "classification",
+                "camera": "front_door",
+                "model": "person_orientation",
+                "attribute": "standing",
+                "id": "person_in_zone",
+                "current_zones": ["steps"],
+            }
+        ),
     )
     await hass.async_block_till_done()
 
@@ -2237,14 +2263,16 @@ async def test_zone_attribute_count_sensor(hass: HomeAssistant) -> None:
     async_fire_mqtt_message(
         hass,
         "frigate/tracked_object_update",
-        json.dumps({
-            "type": "classification",
-            "camera": "front_door",
-            "model": "person_orientation",
-            "attribute": "standing",
-            "id": "person_not_in_zone",
-            "current_zones": [],
-        }),
+        json.dumps(
+            {
+                "type": "classification",
+                "camera": "front_door",
+                "model": "person_orientation",
+                "attribute": "standing",
+                "id": "person_not_in_zone",
+                "current_zones": [],
+            }
+        ),
     )
     await hass.async_block_till_done()
 
@@ -2270,13 +2298,15 @@ async def test_base_count_sensor_sublabel_attributes(hass: HomeAssistant) -> Non
     async_fire_mqtt_message(
         hass,
         "frigate/tracked_object_update",
-        json.dumps({
-            "type": "classification",
-            "camera": "front_door",
-            "model": "person_classifier",
-            "sub_label": "delivery_person",
-            "id": "person_1",
-        }),
+        json.dumps(
+            {
+                "type": "classification",
+                "camera": "front_door",
+                "model": "person_classifier",
+                "sub_label": "delivery_person",
+                "id": "person_1",
+            }
+        ),
     )
     await hass.async_block_till_done()
 
@@ -2289,13 +2319,15 @@ async def test_base_count_sensor_sublabel_attributes(hass: HomeAssistant) -> Non
     async_fire_mqtt_message(
         hass,
         "frigate/tracked_object_update",
-        json.dumps({
-            "type": "classification",
-            "camera": "front_door",
-            "model": "person_classifier",
-            "sub_label": "delivery_person",
-            "id": "person_2",
-        }),
+        json.dumps(
+            {
+                "type": "classification",
+                "camera": "front_door",
+                "model": "person_classifier",
+                "sub_label": "delivery_person",
+                "id": "person_2",
+            }
+        ),
     )
     await hass.async_block_till_done()
 

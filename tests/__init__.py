@@ -415,7 +415,7 @@ async def start_frigate_server(
 
 def create_mock_frigate_client() -> AsyncMock:
     """Create mock frigate client."""
-    
+
     async def mock_get_classification_classes(model_key: str) -> list[str]:
         """Mock get classification classes with different returns per model."""
         if model_key == "person_classifier":
@@ -425,7 +425,7 @@ def create_mock_frigate_client() -> AsyncMock:
         elif model_key == "person_orientation":
             return ["standing", "sitting"]
         return []
-    
+
     mock_client = AsyncMock()
     mock_client.async_get_stats = AsyncMock(return_value=TEST_STATS)
     mock_client.async_get_config = AsyncMock(return_value=TEST_CONFIG)

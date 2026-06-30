@@ -52,13 +52,15 @@ async def _create_sublabel_occupancy_sensors(
     entities: list[FrigateEntity],
 ) -> None:
     """Create occupancy sensors for sublabel classifications."""
-    sublabel_models = get_sublabel_classification_models_and_base_objects(frigate_config)
-    
+    sublabel_models = get_sublabel_classification_models_and_base_objects(
+        frigate_config
+    )
+
     for model_key, base_objects in sublabel_models.items():
         try:
             # Get the sublabel classes from the API
             classes = await client.async_get_classification_model_classes(model_key)
-            
+
             # For each sublabel class, create sensors for each camera/zone where the base object could appear
             for sublabel_class in classes:
                 # Get all cameras and zones where the base object(s) are tracked
@@ -96,7 +98,9 @@ async def async_setup_entry(
     # Add object sensors for cameras and zones.
     entities.extend(
         [
-            FrigateObjectOccupancySensor(entry, frigate_config, cam_name, obj, enable_attribute_tracking)
+            FrigateObjectOccupancySensor(
+                entry, frigate_config, cam_name, obj, enable_attribute_tracking
+            )
             for cam_name, obj in get_cameras_zones_and_objects(frigate_config)
         ]
     )
@@ -116,11 +120,13 @@ async def async_setup_entry(
             for cam_name in get_cameras(frigate_config)
         ]
     )
-    
+
     # Add sublabel occupancy sensors
     # Only create if the option is enabled (defaults to True)
     if entry.options.get(CONF_ENABLE_SUBLABEL_SENSORS, True):
-        await _create_sublabel_occupancy_sensors(entry, frigate_config, client, entities)
+        await _create_sublabel_occupancy_sensors(
+            entry, frigate_config, client, entities
+        )
 
     async_add_entities(entities)
 
@@ -147,12 +153,14 @@ class FrigateObjectOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
         # Note: Entries persist for object lifecycle. The primary occupancy state from
         # the main MQTT topic remains authoritative. Attribute counts are supplementary.
         self._tracked_object_attributes: dict[str, str] = {}
-        
+
         # Find which attribute classification models apply to this object
         # Only check if attribute tracking is enabled
         self._attribute_models = []
         if enable_attribute_tracking:
-            attribute_models_map = get_attribute_classification_models_and_base_objects(frigate_config)
+            attribute_models_map = get_attribute_classification_models_and_base_objects(
+                frigate_config
+            )
             for model_key, base_objects in attribute_models_map.items():
                 if obj_name in base_objects:
                     self._attribute_models.append(model_key)
@@ -161,7 +169,7 @@ class FrigateObjectOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
             f"{self._frigate_config['mqtt']['topic_prefix']}"
             f"/{self._cam_name}/{self._obj_name}"
         )
-        
+
         topics = build_mqtt_topics_with_optional_tracking(
             frigate_config,
             cam_name,
@@ -186,11 +194,11 @@ class FrigateObjectOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
         except ValueError:
             self._is_on = False
         self.async_write_ha_state()
-    
+
     @callback
     def _attribute_message_received(self, msg: ReceiveMessage) -> None:
         """Handle attribute classification messages from tracked_object_update topic.
-        
+
         This provides redundancy with the events topic - objects can be added to
         tracking from either source to ensure nothing is missed.
         """
@@ -203,7 +211,7 @@ class FrigateObjectOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
 
             if data.get("camera") != self._cam_name:
                 return
-            
+
             # Check if this is one of our attribute models
             model_key = data.get("model")
             if model_key not in self._attribute_models:
@@ -221,30 +229,30 @@ class FrigateObjectOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
 
             # Update our tracking of this object's attribute
             old_attribute = self._tracked_object_attributes.get(object_id)
-            
+
             # Decrement old attribute count
             if old_attribute and old_attribute in self._attribute_counts:
                 self._attribute_counts[old_attribute] = max(
                     0, self._attribute_counts[old_attribute] - 1
                 )
-            
+
             # Update to new attribute
             self._tracked_object_attributes[object_id] = attribute
-            
+
             # Increment new attribute count
             self._attribute_counts[attribute] = (
                 self._attribute_counts.get(attribute, 0) + 1
             )
-            
+
             self.async_write_ha_state()
 
         except (ValueError, KeyError):
             pass
-    
+
     @callback
     def _event_message_received(self, msg: ReceiveMessage) -> None:
         """Handle event lifecycle messages from frigate/events topic.
-        
+
         This provides redundancy with tracked_object_update - objects can be added
         from either source. However, only events can remove objects when they end.
         """
@@ -259,35 +267,35 @@ class FrigateObjectOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
             # Only process events for this camera and object type
             if after.get("camera") != self._cam_name:
                 return
-            
+
             if after.get("label") != self._obj_name:
                 return
-            
+
             # Get the object ID
             object_id = after.get("id")
             if not object_id:
                 return
-            
+
             # Check if event has ended (end_time is not null)
             end_time = after.get("end_time")
-            
+
             if end_time is not None:
                 # Event ended - remove this object from our tracking
                 if object_id in self._tracked_object_attributes:
                     old_attribute = self._tracked_object_attributes.pop(object_id)
-                    
+
                     # Decrement the attribute count
                     if old_attribute in self._attribute_counts:
                         self._attribute_counts[old_attribute] = max(
                             0, self._attribute_counts[old_attribute] - 1
                         )
-                    
+
                     self.async_write_ha_state()
             else:
                 # Event is active - check if we have attribute data to track
                 # The event may contain current_attributes with classification data
                 current_attributes = after.get("current_attributes", [])
-                
+
                 # Look for attributes from our tracked models
                 for attr_data in current_attributes:
                     if isinstance(attr_data, dict):
@@ -296,22 +304,27 @@ class FrigateObjectOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
                             attribute = attr_data.get("attribute")
                             if attribute:
                                 # Update tracking
-                                old_attribute = self._tracked_object_attributes.get(object_id)
-                                
+                                old_attribute = self._tracked_object_attributes.get(
+                                    object_id
+                                )
+
                                 # Decrement old attribute count
-                                if old_attribute and old_attribute in self._attribute_counts:
+                                if (
+                                    old_attribute
+                                    and old_attribute in self._attribute_counts
+                                ):
                                     self._attribute_counts[old_attribute] = max(
                                         0, self._attribute_counts[old_attribute] - 1
                                     )
-                                
+
                                 # Update to new attribute
                                 self._tracked_object_attributes[object_id] = attribute
-                                
+
                                 # Increment new attribute count
                                 self._attribute_counts[attribute] = (
                                     self._attribute_counts.get(attribute, 0) + 1
                                 )
-                                
+
                                 self.async_write_ha_state()
                                 break
 
@@ -355,7 +368,7 @@ class FrigateObjectOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
     def device_class(self) -> BinarySensorDeviceClass:
         """Return the device class."""
         return BinarySensorDeviceClass.OCCUPANCY
-    
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
@@ -410,8 +423,7 @@ class FrigateSublabelOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
                     "msg_callback": self._event_message_received,
                     "qos": 0,
                     "topic": (
-                        f"{self._frigate_config['mqtt']['topic_prefix']}"
-                        "/events"
+                        f"{self._frigate_config['mqtt']['topic_prefix']}" "/events"
                     ),
                     "encoding": None,
                 },
@@ -421,7 +433,7 @@ class FrigateSublabelOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
     @callback
     def _state_message_received(self, msg: ReceiveMessage) -> None:
         """Handle classification messages from tracked_object_update topic.
-        
+
         This provides redundancy with the events topic - objects can be added to
         tracking from either source to ensure nothing is missed.
         """
@@ -461,11 +473,11 @@ class FrigateSublabelOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
 
         except (ValueError, KeyError):
             pass
-    
+
     @callback
     def _event_message_received(self, msg: ReceiveMessage) -> None:
         """Handle event lifecycle messages from frigate/events topic.
-        
+
         This provides redundancy with tracked_object_update - objects can be added
         from either source. However, only events can remove objects when they end.
         """
@@ -480,32 +492,32 @@ class FrigateSublabelOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
             # Only process events for this camera and object type
             if after.get("camera") != self._cam_name:
                 return
-            
+
             if after.get("label") != self._obj_name:
                 return
-            
+
             # Get the object ID
             object_id = after.get("id")
             if not object_id:
                 return
-            
+
             # Check if event has ended (end_time is not null)
             end_time = after.get("end_time")
-            
+
             if end_time is not None:
                 # Event ended - remove this object from our tracking
                 if object_id in self._tracked_objects:
                     self._tracked_objects.discard(object_id)
-                    
+
                     # Update occupancy state
                     self._is_on = len(self._tracked_objects) > 0
-                    
+
                     self.async_write_ha_state()
             else:
                 # Event is active - check if we have sublabel data to track
                 # The event may contain current_attributes with classification data
                 current_attributes = after.get("current_attributes", [])
-                
+
                 # Look for sublabels from our tracked model
                 for attr_data in current_attributes:
                     if isinstance(attr_data, dict):
@@ -519,10 +531,10 @@ class FrigateSublabelOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
                                 else:
                                     # Object has a different sublabel, remove from our tracking
                                     self._tracked_objects.discard(object_id)
-                                
+
                                 # Update occupancy state
                                 self._is_on = len(self._tracked_objects) > 0
-                                
+
                                 self.async_write_ha_state()
                                 break
 

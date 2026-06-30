@@ -158,7 +158,9 @@ async def _create_sublabel_sensors(
     entities: list[FrigateEntity],
 ) -> None:
     """Create count sensors for sublabel classifications."""
-    sublabel_models = get_sublabel_classification_models_and_base_objects(frigate_config)
+    sublabel_models = get_sublabel_classification_models_and_base_objects(
+        frigate_config
+    )
     zone_to_camera = _build_zone_to_camera_map(frigate_config)
 
     for model_key, base_objects in sublabel_models.items():
@@ -196,7 +198,9 @@ async def _create_attribute_sensors(
     entities: list[FrigateEntity],
 ) -> None:
     """Create count sensors for attribute classifications."""
-    attribute_models = get_attribute_classification_models_and_base_objects(frigate_config)
+    attribute_models = get_attribute_classification_models_and_base_objects(
+        frigate_config
+    )
     zone_to_camera = _build_zone_to_camera_map(frigate_config)
 
     for model_key, base_objects in attribute_models.items():
@@ -224,7 +228,6 @@ async def _create_attribute_sensors(
                 "Attribute count sensors will not be created for this model.",
                 model_key,
             )
-
 
 
 async def async_setup_entry(
@@ -285,7 +288,7 @@ async def async_setup_entry(
 
     frigate_config = hass.data[DOMAIN][entry.entry_id][ATTR_CONFIG]
     enable_attribute_tracking = entry.options.get(CONF_ENABLE_ATTRIBUTE_TRACKING, True)
-    
+
     entities.extend(
         [
             FrigateReviewStatusSensor(entry, frigate_config, cam_name)
@@ -294,7 +297,9 @@ async def async_setup_entry(
     )
     entities.extend(
         [
-            FrigateObjectCountSensor(entry, frigate_config, cam_name, obj, enable_attribute_tracking)
+            FrigateObjectCountSensor(
+                entry, frigate_config, cam_name, obj, enable_attribute_tracking
+            )
             for cam_name, obj in get_cameras_zones_and_objects(frigate_config)
         ]
     )
@@ -350,12 +355,12 @@ async def async_setup_entry(
         await _create_global_object_classification_sensors(
             entry, frigate_config, client, entities
         )
-        
+
         # Sublabel sensors (create count sensors for each sublabel class)
         # Only create if the option is enabled (defaults to True)
         if entry.options.get(CONF_ENABLE_SUBLABEL_SENSORS, True):
             await _create_sublabel_sensors(entry, frigate_config, client, entities)
-        
+
         # Attribute sensors (create count sensors for each attribute class)
         # Only create if the option is enabled (defaults to True)
         if entry.options.get(CONF_ENABLE_ATTRIBUTE_SENSORS, True):
@@ -856,17 +861,23 @@ class FrigateObjectCountSensor(FrigateMQTTEntity, SensorEntity):
         self._attribute_models: list[str] = []
         self._sublabel_models: list[str] = []
         if enable_attribute_tracking:
-            attribute_models_map = get_attribute_classification_models_and_base_objects(frigate_config)
+            attribute_models_map = get_attribute_classification_models_and_base_objects(
+                frigate_config
+            )
             for model_key, base_objects in attribute_models_map.items():
                 if obj_name in base_objects:
                     self._attribute_models.append(model_key)
 
-            sublabel_models_map = get_sublabel_classification_models_and_base_objects(frigate_config)
+            sublabel_models_map = get_sublabel_classification_models_and_base_objects(
+                frigate_config
+            )
             for model_key, base_objects in sublabel_models_map.items():
                 if obj_name in base_objects:
                     self._sublabel_models.append(model_key)
 
-        has_classification_models = bool(self._attribute_models or self._sublabel_models)
+        has_classification_models = bool(
+            self._attribute_models or self._sublabel_models
+        )
 
         primary_topic = (
             f"{self._frigate_config['mqtt']['topic_prefix']}"
@@ -1014,7 +1025,9 @@ class FrigateObjectCountSensor(FrigateMQTTEntity, SensorEntity):
                         value = attr_data.get("sub_label")
                     else:
                         continue
-                    if value and self._update_classification(model_key, object_id, value):
+                    if value and self._update_classification(
+                        model_key, object_id, value
+                    ):
                         changed = True
                 if changed:
                     self.async_write_ha_state()
@@ -1187,7 +1200,9 @@ class FrigateSublabelCountSensor(FrigateMQTTEntity, SensorEntity):
         self._frigate_config = frigate_config
         self._icon = get_icon_from_type(self._obj_name)
         # actual_cam_name is the real camera name when cam_name is a zone
-        self._actual_cam_name = actual_cam_name if actual_cam_name is not None else cam_name
+        self._actual_cam_name = (
+            actual_cam_name if actual_cam_name is not None else cam_name
+        )
         self._is_zone = cam_name != self._actual_cam_name
         # Track object_id -> classification value mapping.
         # For zone sensors this spans the parent camera; zone membership is
@@ -1226,7 +1241,9 @@ class FrigateSublabelCountSensor(FrigateMQTTEntity, SensorEntity):
             )
         else:
             self._state = sum(
-                1 for val in self._tracked_objects.values() if val == self._sublabel_class
+                1
+                for val in self._tracked_objects.values()
+                if val == self._sublabel_class
             )
 
     @callback
@@ -1857,15 +1874,17 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
         self._frigate_config = frigate_config
         # If actual_cam_name is provided, this is a zone sensor and we need to filter by camera
         # For backward compatibility, if actual_cam_name is None, use cam_or_zone_name
-        self._actual_cam_name = actual_cam_name if actual_cam_name is not None else cam_or_zone_name
+        self._actual_cam_name = (
+            actual_cam_name if actual_cam_name is not None else cam_or_zone_name
+        )
         self._is_zone = self._cam_or_zone_name != self._actual_cam_name
         # Track object IDs that have been classified so we can clear state on lifecycle end
         self._classified_objects: set[str] = set()
         # For zone sensors, track which objects are currently in the zone
         self._objects_in_zone: set[str] = set()
 
-        mqtt_prefix = self._frigate_config['mqtt']['topic_prefix']
-        
+        mqtt_prefix = self._frigate_config["mqtt"]["topic_prefix"]
+
         super().__init__(
             config_entry,
             frigate_config,
@@ -1948,7 +1967,7 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
 
             # Determine if this is a zone sensor
             is_zone_sensor = self._cam_or_zone_name != self._actual_cam_name
-            
+
             # For zone sensors, check if the object is in the zone
             if is_zone_sensor:
                 current_zones = after.get("current_zones", [])
@@ -1957,11 +1976,11 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
 
             # Look for classification data in current_attributes
             current_attributes = after.get("current_attributes", [])
-            
+
             for attr_data in current_attributes:
                 if not isinstance(attr_data, dict):
                     continue
-                    
+
                 model_key = attr_data.get("model")
                 if model_key != self._model_key:
                     continue
@@ -2010,10 +2029,16 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
     def device_info(self) -> DeviceInfo:
         """Get device information."""
         # Zones don't have a camera configuration page
-        cam_suffix = "" if self._cam_or_zone_name in get_zones(self._frigate_config) else self._cam_or_zone_name
+        cam_suffix = (
+            ""
+            if self._cam_or_zone_name in get_zones(self._frigate_config)
+            else self._cam_or_zone_name
+        )
         return {
             "identifiers": {
-                get_frigate_device_identifier(self._config_entry, self._cam_or_zone_name)
+                get_frigate_device_identifier(
+                    self._config_entry, self._cam_or_zone_name
+                )
             },
             "via_device": get_frigate_device_identifier(self._config_entry),
             "name": get_friendly_name(self._cam_or_zone_name),

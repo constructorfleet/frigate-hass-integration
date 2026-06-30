@@ -357,4 +357,3 @@ async def test_event_end_different_label_ignored(hass: HomeAssistant) -> None:
     entity_state = hass.states.get(TEST_SENSOR_FRONT_DOOR_PERSON_ENTITY_ID)
     assert entity_state
     assert entity_state.attributes.get("standing") == 1
-

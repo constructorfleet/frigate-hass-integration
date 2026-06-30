@@ -215,7 +215,7 @@ def get_object_classification_models_cameras_and_zones(
     config: dict[str, Any],
 ) -> set[tuple[str, str, str]]:
     """Get object classification models with cameras/zones tuples.
-    
+
     Returns a set of tuples: (camera_or_zone_name, model_key, camera_name)
     where camera_name is the actual camera (used for MQTT filtering).
     """
@@ -237,12 +237,14 @@ def get_object_classification_models_cameras_and_zones(
                 if any(obj in tracked_objects for obj in objects_to_classify):
                     # Add camera entry
                     model_items.add((cam_name, model_key, cam_name))
-                    
+
                     # Add zone entries for this camera
                     for zone_name, zone_config in cam_config.get("zones", {}).items():
                         zone_objects = zone_config.get("objects")
                         # If zone doesn't specify objects or includes any of the classified objects
-                        if not zone_objects or any(obj in zone_objects for obj in objects_to_classify):
+                        if not zone_objects or any(
+                            obj in zone_objects for obj in objects_to_classify
+                        ):
                             model_items.add((zone_name, model_key, cam_name))
 
     return model_items
@@ -252,7 +254,7 @@ def get_sublabel_classification_models_and_base_objects(
     config: dict[str, Any],
 ) -> dict[str, list[str]]:
     """Get mapping of sublabel classification models to their base objects.
-    
+
     Returns a dict where keys are model_keys and values are lists of base object types.
     Example: {"person_classifier": ["person"], "dog_classifier": ["dog"]}
     """
@@ -277,7 +279,7 @@ def get_attribute_classification_models_and_base_objects(
     config: dict[str, Any],
 ) -> dict[str, list[str]]:
     """Get mapping of attribute classification models to their base objects.
-    
+
     Returns a dict where keys are model_keys and values are lists of base object types.
     Example: {"wastebin_orientation": ["wastebin"]}
     """
@@ -321,7 +323,7 @@ def build_mqtt_topics_with_optional_tracking(
     events_callback: Callable | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Build MQTT topic configuration with optional tracked_object_update subscription.
-    
+
     Args:
         config: Frigate configuration
         cam_name: Camera name (reserved for future filtering use)
@@ -335,7 +337,7 @@ def build_mqtt_topics_with_optional_tracking(
         events_callback: Optional callback for frigate/events topic.
                         If provided, the events topic will be added to track
                         object lifecycle (removal when end_time is not null).
-        
+
     Returns:
         Dictionary of topic configurations for MQTT subscription
     """
@@ -347,16 +349,17 @@ def build_mqtt_topics_with_optional_tracking(
             "encoding": None,
         },
     }
-    
+
     # Add tracked_object_update subscription if there are attribute models for this object
     # and a secondary callback is provided
     if secondary_callback:
-        attribute_models_map = get_attribute_classification_models_and_base_objects(config)
-        has_attribute_models = any(
-            obj_name in base_objects 
-            for base_objects in attribute_models_map.values()
+        attribute_models_map = get_attribute_classification_models_and_base_objects(
+            config
         )
-        
+        has_attribute_models = any(
+            obj_name in base_objects for base_objects in attribute_models_map.values()
+        )
+
         if has_attribute_models:
             mqtt_prefix = config.get("mqtt", {}).get("topic_prefix", "frigate")
             topics["attribute_topic"] = {
@@ -365,7 +368,7 @@ def build_mqtt_topics_with_optional_tracking(
                 "topic": f"{mqtt_prefix}/tracked_object_update",
                 "encoding": None,
             }
-    
+
     # Add events topic subscription if an events callback is provided
     if events_callback:
         mqtt_prefix = config.get("mqtt", {}).get("topic_prefix", "frigate")
@@ -375,7 +378,7 @@ def build_mqtt_topics_with_optional_tracking(
             "topic": f"{mqtt_prefix}/events",
             "encoding": None,
         }
-    
+
     return topics
 
 
