@@ -1345,9 +1345,7 @@ async def test_zone_object_classification_sensor_from_events(
     hass: HomeAssistant,
 ) -> None:
     """Test FrigateObjectClassificationSensor for zones receives data from events topic."""
-    with patch(
-        "custom_components.frigate.sensor.async_call_later"
-    ) as mock_async_call_later:
+    with patch("custom_components.frigate.sensor.async_call_later"):
         await setup_mock_frigate_config_entry(hass)
         async_fire_mqtt_message(hass, "frigate/available", "online")
         await hass.async_block_till_done()

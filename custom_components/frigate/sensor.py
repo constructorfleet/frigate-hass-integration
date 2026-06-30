@@ -43,7 +43,6 @@ from . import (
     get_frigate_device_identifier,
     get_frigate_entity_unique_id,
     get_known_plates,
-    get_object_classification_models_and_cameras,
     get_object_classification_models_cameras_and_zones,
     get_sublabel_classification_models_and_base_objects,
     get_zones,
@@ -970,7 +969,7 @@ class FrigateObjectCountSensor(FrigateMQTTEntity, SensorEntity):
             if not value:
                 return
 
-            if self._update_classification(model_key, object_id, value):
+            if model_key and self._update_classification(model_key, object_id, value):
                 self.async_write_ha_state()
 
         except (ValueError, KeyError):
@@ -1597,7 +1596,10 @@ class FrigateRecognizedFaceSensor(FrigateMQTTEntity, SensorEntity):
             if data.get("camera") != self._cam_name:
                 return
 
-            self._state = data["name"]
+            if not (name := data.get("name")):
+                return
+
+            self._state = str(name)
             self.async_write_ha_state()
 
             if self._clear_state_callable:
@@ -1882,6 +1884,7 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
             actual_cam_name if actual_cam_name is not None else cam_or_zone_name
         )
         self._is_zone = self._cam_or_zone_name != self._actual_cam_name
+        self._clear_state_callable: Callable | None = None
         # Track object IDs that have been classified so we can clear state on lifecycle end
         self._classified_objects: set[str] = set()
         # For zone sensors, track which objects are currently in the zone
@@ -1969,6 +1972,22 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
             if after.get("camera") != self._actual_cam_name:
                 return
 
+            object_id = after.get("id")
+            if not object_id:
+                return
+
+            end_time = after.get("end_time")
+            if end_time is not None:
+                self._classified_objects.discard(object_id)
+                if self._is_zone:
+                    self._objects_in_zone.discard(object_id)
+                if self._clear_state_callable:
+                    self._clear_state_callable()
+                    self._clear_state_callable = None
+                self._state = None
+                self.async_write_ha_state()
+                return
+
             # Determine if this is a zone sensor
             is_zone_sensor = self._cam_or_zone_name != self._actual_cam_name
 
@@ -1977,6 +1996,7 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
                 current_zones = after.get("current_zones", [])
                 if self._cam_or_zone_name not in current_zones:
                     return
+                self._objects_in_zone.add(object_id)
 
             # Look for classification data in current_attributes
             current_attributes = after.get("current_attributes", [])
@@ -1997,6 +2017,7 @@ class FrigateObjectClassificationSensor(FrigateMQTTEntity, SensorEntity):
                 else:
                     continue
 
+                self._classified_objects.add(object_id)
                 self.async_write_ha_state()
 
                 if self._clear_state_callable:

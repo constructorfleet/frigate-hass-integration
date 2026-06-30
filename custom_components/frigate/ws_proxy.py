@@ -94,10 +94,15 @@ class WSMQTTProxy(ABC):
 
     def _receive_message(self, hass: HomeAssistant, msg: ReceiveMessage) -> None:
         """Handle a new received MQTT message."""
+        payload = (
+            msg.payload.decode("utf-8")
+            if isinstance(msg.payload, bytes | bytearray)
+            else msg.payload
+        )
 
         async def proxy() -> None:
             for id, connection in self._subscriptions.items():
-                connection.send_message(messages.event_message(id, msg.payload))
+                connection.send_message(messages.event_message(id, payload))
 
         # Must proxy in the executor pool to ensure threadsafety. Otherwise:
         # `RuntimeError: Non-thread-safe operation invoked on an event loop other than the current one``

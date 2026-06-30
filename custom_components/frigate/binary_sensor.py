@@ -304,17 +304,18 @@ class FrigateObjectOccupancySensor(FrigateMQTTEntity, BinarySensorEntity):
                             attribute = attr_data.get("attribute")
                             if attribute:
                                 # Update tracking
-                                old_attribute = self._tracked_object_attributes.get(
-                                    object_id
+                                previous_attribute: str | None = (
+                                    self._tracked_object_attributes.get(object_id)
                                 )
 
                                 # Decrement old attribute count
                                 if (
-                                    old_attribute
-                                    and old_attribute in self._attribute_counts
+                                    previous_attribute
+                                    and previous_attribute in self._attribute_counts
                                 ):
-                                    self._attribute_counts[old_attribute] = max(
-                                        0, self._attribute_counts[old_attribute] - 1
+                                    self._attribute_counts[previous_attribute] = max(
+                                        0,
+                                        self._attribute_counts[previous_attribute] - 1,
                                     )
 
                                 # Update to new attribute

@@ -2,16 +2,11 @@
 
 import json
 
-import pytest
 from pytest_homeassistant_custom_component.common import async_fire_mqtt_message
 
 from homeassistant.core import HomeAssistant
 
-from . import (
-    TEST_SENSOR_FRONT_DOOR_PERSON_ENTITY_ID,
-    TEST_SENSOR_STEPS_PERSON_ENTITY_ID,
-    setup_mock_frigate_config_entry,
-)
+from . import TEST_SENSOR_FRONT_DOOR_PERSON_ENTITY_ID, setup_mock_frigate_config_entry
 
 
 async def test_attribute_tracking_from_events(hass: HomeAssistant) -> None:

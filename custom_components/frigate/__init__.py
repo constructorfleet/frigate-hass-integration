@@ -75,7 +75,7 @@ from .const import (
     STATUS_RUNNING,
     STATUS_STARTING,
 )
-from .llm_functions import FrigateServiceAPI
+from .llm_functions import FRIGATE_SERVICES_API_ID, FrigateServiceAPI
 from .views import async_setup as views_async_setup
 from .ws_api import async_setup as ws_api_async_setup
 from .ws_proxy import WSEventProxy, WSReviewProxy
@@ -590,9 +590,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         verify_frigate_version(config, "0.18")
         and ATTR_LLM_UNREGISTER not in hass.data[DOMAIN]
     ):
-        hass.data[DOMAIN][ATTR_LLM_UNREGISTER] = llm.async_register_api(
-            hass, FrigateServiceAPI(hass=hass)
-        )
+        llm.async_register_api(hass, FrigateServiceAPI(hass=hass))
+        hass.data[DOMAIN][ATTR_LLM_UNREGISTER] = FRIGATE_SERVICES_API_ID
 
     # Register review summarize service if Frigate version is 0.17+
     if verify_frigate_version(config, "0.17"):
@@ -685,7 +684,8 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
             if isinstance(v, dict) and ATTR_CLIENT in v
         }
         if not remaining and ATTR_LLM_UNREGISTER in hass.data[DOMAIN]:
-            hass.data[DOMAIN].pop(ATTR_LLM_UNREGISTER)()
+            api_id = hass.data[DOMAIN].pop(ATTR_LLM_UNREGISTER)
+            llm._async_get_apis(hass).pop(api_id, None)
 
     return unload_ok
 
